@@ -49,3 +49,5 @@ Thumbs.db
 
 # 테스트 생성 파일
 test_generated.py
+pr_inspector.db
+frontend/tsconfig.tsbuildinfo
