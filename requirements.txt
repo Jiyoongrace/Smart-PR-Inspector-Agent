@@ -1,0 +1,58 @@
+# Core
+langgraph==0.2.28
+langchain==0.3.7
+langchain-anthropic==0.3.1
+langchain-openai==0.2.6
+
+# LLM
+anthropic==0.40.0
+openai==1.54.4
+
+# GitHub
+PyGithub==2.3.0
+unidiff==0.7.5
+
+# Vector DB
+chromadb==0.5.18
+
+# API Server
+fastapi==0.115.5
+uvicorn[standard]==0.32.0
+python-multipart==0.0.12
+
+# Slack
+slack-sdk==3.33.4
+slack-bolt==1.21.2
+
+# Database / Cache
+redis==5.2.0
+asyncpg==0.30.0
+sqlalchemy==2.0.36
+
+# Code Analysis
+pylint==3.3.1
+radon==6.0.1
+bandit==1.8.0
+
+# Testing
+pytest==8.3.3
+pytest-timeout==2.3.1
+pytest-asyncio==0.24.0
+
+# Utilities
+pydantic==2.9.2
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
+pyyaml==6.0.2
+jinja2==3.1.4
+httpx==0.27.2
+
+# Docker
+docker==7.1.0
+
+# Monitoring
+prometheus-client==0.21.1
+sentry-sdk==2.18.0
+
+# Data
+aiohttp==3.11.7

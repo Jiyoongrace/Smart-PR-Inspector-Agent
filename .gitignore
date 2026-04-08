@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# 환경변수 (절대 커밋 금지)
+.env
+.env.local
+.env.*.local
+
+# 임시 파일
+/tmp/
+*.tmp
+/tmp/pr_inspector_tests/
+
+# ChromaDB 로컬 데이터
+.chroma/
+
+# Next.js
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+frontend/.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# 테스트 생성 파일
+test_generated.py
