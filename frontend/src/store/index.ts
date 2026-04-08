@@ -60,35 +60,7 @@ export const useAppStore = create<AppState>()(
         state.activeTab = "overview";
       }),
 
-    prList: [
-      // 데모 데이터
-      {
-        pr_number: 1234,
-        repo: "acme/backend",
-        title: "재고 차감 로직 개선",
-        author: "jiyoon",
-        status: "completed",
-        created_at: new Date(Date.now() - 3600000).toISOString(),
-        risk_level: "medium",
-      },
-      {
-        pr_number: 1233,
-        repo: "acme/backend",
-        title: "사용자 인증 리팩토링",
-        author: "devhoon",
-        status: "analyzing",
-        created_at: new Date(Date.now() - 7200000).toISOString(),
-      },
-      {
-        pr_number: 1232,
-        repo: "acme/frontend",
-        title: "결제 페이지 UI 개선",
-        author: "jiyoon",
-        status: "completed",
-        created_at: new Date(Date.now() - 86400000).toISOString(),
-        risk_level: "low",
-      },
-    ],
+    prList: [],
     addOrUpdatePR: (item) =>
       set((state) => {
         const idx = state.prList.findIndex(

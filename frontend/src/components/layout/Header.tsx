@@ -14,7 +14,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { useAppStore } from "@/store";
-import { analyzePR, connectAnalysisStream } from "@/lib/api";
+import { connectAnalysisStream } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export function Header() {
@@ -56,6 +56,34 @@ export function Header() {
       created_at: new Date().toISOString(),
     });
 
+    // 분석 시작 시 currentAnalysis를 빈 상태로 초기화 (노드 상태 업데이트가 동작하도록)
+    setCurrentAnalysis({
+      pr_data: null,
+      convention_result: null,
+      test_result: null,
+      impact_analysis: null,
+      domain_explanation: null,
+      domain_sources: [],
+      doc_updates: null,
+      final_comment: null,
+      slack_thread_id: null,
+      github_comment_id: null,
+      node_status: {
+        fetch: "pending",
+        convention: "pending",
+        test_gen: "pending",
+        test_run: "pending",
+        impact: "pending",
+        domain_explain: "pending",
+        doc_sync: "pending",
+        comment: "pending",
+        slack: "pending",
+      },
+      error_message: null,
+      started_at: new Date().toISOString(),
+      completed_at: null,
+    });
+
     // Agent 메시지
     addChatMessage({
       id: Date.now().toString(),
@@ -73,18 +101,21 @@ export function Header() {
           updateNodeStatus(event.status);
         } else if (event.type === "complete") {
           setIsAnalyzing(false);
+          // 최종 분석 결과를 store에 저장 → AnalysisResults 패널에 표시
+          setCurrentAnalysis(event.state);
           addOrUpdatePR({
             pr_number: prNumber,
             repo: repoInput,
-            title: `PR #${prNumber}`,
-            author: "",
+            title: event.state.pr_data?.title ?? `PR #${prNumber}`,
+            author: event.state.pr_data?.author ?? "",
             status: "completed",
             created_at: new Date().toISOString(),
+            risk_level: event.state.impact_analysis?.risk_level,
           });
           addChatMessage({
             id: Date.now().toString(),
             role: "agent",
-            content: `✅ **PR #${prNumber}** 분석 완료! 왼쪽 결과 패널에서 상세 내용을 확인하세요.`,
+            content: `✅ **PR #${prNumber}** 분석 완료! 결과 패널에서 상세 내용을 확인하세요.`,
             timestamp: new Date().toISOString(),
           });
         } else if (event.type === "error") {

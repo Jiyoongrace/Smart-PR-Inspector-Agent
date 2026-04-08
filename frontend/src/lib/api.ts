@@ -69,8 +69,42 @@ export function connectAnalysisStream(
   return es;
 }
 
+// 분석 이력 목록 조회
+export async function fetchHistory(limit = 50) {
+  const { data } = await api.get("/api/history", { params: { limit } });
+  return data as { items: HistoryItem[]; total: number };
+}
+
+// 특정 분석 이력 상세 조회 (분석 결과 포함)
+export async function fetchHistoryItem(recordId: number) {
+  const { data } = await api.get(`/api/history/${recordId}`);
+  return data as HistoryItem & { analysis: AgentState };
+}
+
 // 헬스체크
 export async function healthCheck() {
   const { data } = await api.get("/health");
   return data;
+}
+
+export interface HistoryItem {
+  id: number;
+  repo: string;
+  pr_number: number;
+  pr_title: string;
+  pr_author: string;
+  pr_url: string;
+  base_branch: string;
+  head_branch: string;
+  changed_files_count: number;
+  risk_level: string;
+  convention_passed: boolean;
+  convention_violations: number;
+  test_passed: boolean;
+  test_total: number;
+  test_passed_count: number;
+  has_api_changes: boolean;
+  created_at: string;
+  duration_seconds: number;
+  status: string;
 }

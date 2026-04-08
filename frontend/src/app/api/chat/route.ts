@@ -1,10 +1,10 @@
-// Claude API를 활용한 PR 컨텍스트 기반 채팅 스트리밍 엔드포인트
+// OpenAI GPT-5.4를 활용한 PR 컨텍스트 기반 채팅 스트리밍 엔드포인트
 
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { NextRequest } from "next/server";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 const SYSTEM_PROMPT = `당신은 Smart PR Inspector라는 AI 에이전트입니다.
@@ -24,16 +24,19 @@ GitHub Pull Request 분석을 전문으로 하며, 개발자들이 코드 품질
 - 핵심을 간결하게 전달`;
 
 export async function POST(req: NextRequest) {
-  const { message, context, pr_data } = await req.json();
+  const { message, context } = await req.json();
 
   const userMessage = `${context ? `[현재 PR 컨텍스트]\n${context}\n\n` : ""}[질문]\n${message}`;
 
-  // 스트리밍 응답 생성
-  const stream = await anthropic.messages.stream({
-    model: "claude-haiku-4-5-20251001",
+  // OpenAI 스트리밍 응답 생성
+  const stream = await openai.chat.completions.create({
+    model: "gpt-5.4",
     max_tokens: 1024,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: userMessage }],
+    stream: true,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: userMessage },
+    ],
   });
 
   // ReadableStream으로 변환
@@ -41,11 +44,9 @@ export async function POST(req: NextRequest) {
   const readable = new ReadableStream({
     async start(controller) {
       for await (const chunk of stream) {
-        if (
-          chunk.type === "content_block_delta" &&
-          chunk.delta.type === "text_delta"
-        ) {
-          controller.enqueue(encoder.encode(chunk.delta.text));
+        const text = chunk.choices[0]?.delta?.content ?? "";
+        if (text) {
+          controller.enqueue(encoder.encode(text));
         }
       }
       controller.close();
