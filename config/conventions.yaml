@@ -1,0 +1,115 @@
+# 팀 코딩 컨벤션 룰북
+# Smart PR Inspector Agent가 참조하는 규칙 정의
+
+naming:
+  description: "네이밍 컨벤션"
+  rules:
+    - id: snake_case_functions
+      description: "함수명은 snake_case를 사용한다"
+      example_bad: "def getData()"
+      example_good: "def get_data()"
+      severity: warning
+
+    - id: pascal_case_classes
+      description: "클래스명은 PascalCase를 사용한다"
+      example_bad: "class user_service"
+      example_good: "class UserService"
+      severity: warning
+
+    - id: upper_case_constants
+      description: "상수는 UPPER_SNAKE_CASE를 사용한다"
+      example_bad: "max_retry = 3"
+      example_good: "MAX_RETRY = 3"
+      severity: info
+
+    - id: no_abbreviations
+      description: "의미 없는 약어를 지양한다"
+      example_bad: "def calc_disc_prc()"
+      example_good: "def calculate_discount_price()"
+      severity: info
+
+type_hints:
+  description: "타입 힌트 규칙"
+  rules:
+    - id: require_param_hints
+      description: "함수 파라미터에 타입 힌트를 반드시 작성한다"
+      severity: info
+
+    - id: require_return_hint
+      description: "함수 반환 타입 힌트를 작성한다 (None 포함)"
+      severity: info
+
+error_handling:
+  description: "에러 처리 규칙"
+  rules:
+    - id: no_bare_except
+      description: "bare except: 사용 금지 - 구체적인 예외 클래스 지정"
+      example_bad: "except:"
+      example_good: "except ValueError as e:"
+      severity: error
+
+    - id: no_silent_exception
+      description: "예외를 무시(pass)하지 않는다"
+      example_bad: "except Exception: pass"
+      example_good: "except Exception as e: logger.error(e)"
+      severity: warning
+
+    - id: use_specific_exceptions
+      description: "Exception 대신 구체적 예외를 사용한다"
+      example_bad: "raise Exception('error')"
+      example_good: "raise ValueError('잘못된 입력값')"
+      severity: warning
+
+code_quality:
+  description: "코드 품질 규칙"
+  rules:
+    - id: no_magic_numbers
+      description: "매직 넘버는 상수로 분리한다"
+      example_bad: "if retry_count >= 3:"
+      example_good: "if retry_count >= MAX_RETRY:"
+      severity: info
+
+    - id: max_function_length
+      description: "함수는 50줄을 넘기지 않는다"
+      threshold: 50
+      severity: warning
+
+    - id: max_complexity
+      description: "순환 복잡도는 10 이하로 유지한다"
+      threshold: 10
+      severity: warning
+
+    - id: no_print_statements
+      description: "print() 대신 logging 모듈을 사용한다"
+      severity: warning
+
+    - id: require_docstring
+      description: "public 함수와 클래스에는 docstring을 작성한다"
+      severity: info
+
+security:
+  description: "보안 규칙"
+  rules:
+    - id: no_hardcoded_secrets
+      description: "시크릿/패스워드를 코드에 하드코딩하지 않는다"
+      patterns: ["password", "secret", "api_key", "token"]
+      severity: error
+
+    - id: sql_injection
+      description: "SQL 쿼리는 파라미터화하여 작성한다"
+      severity: error
+
+    - id: no_eval
+      description: "eval() 사용을 금지한다"
+      severity: error
+
+imports:
+  description: "임포트 규칙"
+  rules:
+    - id: no_wildcard_imports
+      description: "와일드카드 임포트(from x import *) 금지"
+      severity: warning
+
+    - id: stdlib_first
+      description: "임포트 순서: 표준 라이브러리 → 서드파티 → 내부 모듈"
+      severity: info
