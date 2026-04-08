@@ -15,8 +15,8 @@ from agents.state import AgentState, NodeStatus, TestResult
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRY = 3
-TIMEOUT_SECONDS = 300  # 5분
+MAX_RETRY = 1  # 재시도 1회로 제한 (속도 우선)
+TIMEOUT_SECONDS = 30  # 30초 (Docker pull 대기 제거)
 
 
 def test_runner_node(state: AgentState) -> AgentState:
@@ -32,8 +32,9 @@ def test_runner_node(state: AgentState) -> AgentState:
 
     start_time = time.time()
 
-    # Docker 사용 가능 여부 확인
-    use_docker = _check_docker_available()
+    # 로컬 실행 우선 (Docker는 초기 이미지 pull로 느림)
+    # ENABLE_DOCKER_TESTS=true 환경변수로 명시 활성화 가능
+    use_docker = os.getenv("ENABLE_DOCKER_TESTS", "false").lower() == "true" and _check_docker_available()
 
     if use_docker:
         result = _run_with_docker(test_file)

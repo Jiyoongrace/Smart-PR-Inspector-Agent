@@ -8,6 +8,8 @@ import logging
 from datetime import datetime, timezone
 from typing import AsyncGenerator, Optional
 
+from db.history import save_analysis
+
 from langgraph.graph import END, StateGraph
 
 from agents.nodes import (
@@ -45,11 +47,12 @@ def create_workflow():
     workflow.add_node("slack", slack_notify_node)
 
     # ── 엣지 연결 ──────────────────────────────────────────────
+    # 순차 실행: 병렬 실행 시 동일 state key 동시 업데이트 오류 방지
     workflow.set_entry_point("fetch")
 
-    # fetch → convention + test_gen (병렬)
+    # fetch → convention → test_gen (순차)
     workflow.add_edge("fetch", "convention")
-    workflow.add_edge("fetch", "test_gen")
+    workflow.add_edge("convention", "test_gen")
 
     # test_gen → test_run
     workflow.add_edge("test_gen", "test_run")
@@ -61,13 +64,10 @@ def create_workflow():
         {
             "retry": "fix_test",
             "success": "impact",
-            "fail": "comment",  # Fallback: 테스트 실패해도 나머지 분석 수행
+            "fail": "impact",  # 테스트 실패해도 나머지 분석 수행
         },
     )
     workflow.add_edge("fix_test", "test_run")
-
-    # convention → impact (convention 완료 후 합류)
-    workflow.add_edge("convention", "impact")
 
     # impact → domain_explain → doc_sync → comment → slack → END
     workflow.add_edge("impact", "domain_explain")
@@ -162,20 +162,44 @@ async def run_pr_analysis_stream(
         "timestamp": initial_state.started_at,
     }
 
+    final_state = initial_state  # 최신 상태 추적
+
     try:
         async for event in workflow.astream(initial_state):
             for node_name, node_output in event.items():
+                # LangGraph는 Pydantic 모델 또는 dict로 반환할 수 있음
+                state: Optional[AgentState] = None
                 if isinstance(node_output, AgentState):
+                    state = node_output
+                elif isinstance(node_output, dict):
+                    try:
+                        state = AgentState(**node_output)
+                    except Exception:
+                        pass
+
+                if state:
+                    final_state = state
                     yield {
                         "type": "node_complete",
                         "node": node_name,
-                        "status": node_output.node_status.model_dump(),
+                        "status": state.node_status.model_dump(),
                         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
                     }
 
+        final_state.completed_at = datetime.now(tz=timezone.utc).isoformat()
+        state_dict = final_state.model_dump(mode="json")
+
+        # DB에 분석 이력 저장 (별도 스레드에서 실행)
+        try:
+            await asyncio.to_thread(save_analysis, state_dict)
+        except Exception as db_err:
+            logger.warning(f"DB 저장 실패 (무시): {db_err}")
+
         yield {
             "type": "complete",
-            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            # 최종 분석 결과 전체를 포함 (프론트엔드에서 바로 사용)
+            "state": state_dict,
+            "timestamp": final_state.completed_at,
         }
 
     except Exception as e:
