@@ -1,0 +1,95 @@
+name: CI/CD — Smart PR Inspector
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: 백엔드 테스트
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: 테스트 실행
+        run: pytest tests/ -v --tb=short
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN_TEST }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          REDIS_URL: redis://localhost:6379
+
+  lint:
+    name: 린트 검사
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: pylint
+        run: |
+          pip install pylint
+          pylint agents/ api/ --fail-under=7.0
+
+  frontend-test:
+    name: 프론트엔드 빌드
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node.js 설정
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 의존성 설치
+        run: cd frontend && npm ci
+
+      - name: 타입 체크
+        run: cd frontend && npm run type-check
+
+      - name: 빌드
+        run: cd frontend && npm run build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  deploy:
+    name: 배포 (Railway)
+    needs: [test, lint, frontend-test]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Railway 배포
+        run: |
+          curl -fsSL https://railway.app/install.sh | sh
+          railway up --service smart-pr-inspector-api
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
