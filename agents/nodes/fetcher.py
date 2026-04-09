@@ -6,6 +6,7 @@ PyGithub + unidiff 활용
 import logging
 import os
 import re
+import socket
 from datetime import datetime, timezone
 
 from github import Github, GithubException
@@ -20,8 +21,17 @@ def fetch_pr_data_node(state: AgentState) -> AgentState:
     state.node_status.fetch = NodeStatus.RUNNING
     logger.info(f"PR #{state.pr_data.pr_number} 데이터 수집 시작")
 
+    # GITHUB_TOKEN 미설정 조기 검증
+    github_token = os.getenv("GITHUB_TOKEN")
+    if not github_token:
+        state.node_status.fetch = NodeStatus.FAILED
+        state.error_message = "GITHUB_TOKEN 환경변수가 설정되지 않았습니다. .env 파일을 확인하세요."
+        logger.error(state.error_message)
+        return state
+
     try:
-        gh = Github(os.getenv("GITHUB_TOKEN"))
+        # timeout=10: 연결 10초, 읽기 30초 — 무한 대기 방지
+        gh = Github(github_token, timeout=10)
         repo_name = state.pr_data.repo
         pr_number = state.pr_data.pr_number
 
@@ -75,5 +85,19 @@ def fetch_pr_data_node(state: AgentState) -> AgentState:
         state.node_status.fetch = NodeStatus.FAILED
         state.error_message = f"GitHub API 오류: {e.status} - {e.data}"
         logger.error(state.error_message)
+
+    except (socket.gaierror, ConnectionError, OSError) as e:
+        state.node_status.fetch = NodeStatus.FAILED
+        state.error_message = (
+            f"GitHub 네트워크 연결 오류: {e}\n"
+            "인터넷 연결 또는 DNS 설정을 확인하세요. "
+            "VPN/프록시 환경에서는 'api.github.com' 접속이 가능한지 확인하세요."
+        )
+        logger.error(state.error_message)
+
+    except Exception as e:
+        state.node_status.fetch = NodeStatus.FAILED
+        state.error_message = f"PR 데이터 수집 실패: {type(e).__name__}: {e}"
+        logger.error(state.error_message, exc_info=True)
 
     return state

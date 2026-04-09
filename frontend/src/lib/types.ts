@@ -92,7 +92,7 @@ export interface AgentState {
 export type SSEEvent =
   | { type: "start"; pr_number: number; repo: string; timestamp: string }
   | { type: "node_complete"; node: string; status: NodeExecutionStatus; timestamp: string }
-  | { type: "complete"; timestamp: string }
+  | { type: "complete"; state: AgentState; timestamp: string }
   | { type: "error"; message: string; timestamp: string }
   | { type: "done" };
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   GitPullRequest,
@@ -11,14 +11,15 @@ import {
   ChevronRight,
   Search,
   Settings,
-  LayoutDashboard,
   Zap,
   History,
-  Shield,
+  ExternalLink,
+  RefreshCw,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
 import { useAppStore } from "@/store";
+import { fetchHistory, fetchHistoryItem, type HistoryItem } from "@/lib/api";
 import type { PRListItem, RiskLevel } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -37,9 +38,40 @@ const STATUS_ICONS = {
 };
 
 export function Sidebar() {
-  const { prList, selectedPR, setSelectedPR, isSidebarOpen } = useAppStore();
+  const { prList, selectedPR, setSelectedPR, setCurrentAnalysis, isSidebarOpen } = useAppStore();
   const [search, setSearch] = useState("");
   const [navItem, setNavItem] = useState<"prs" | "history" | "settings">("prs");
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const loadHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const data = await fetchHistory(50);
+      setHistory(data.items);
+    } catch {
+      // 백엔드 미실행 시 빈 목록 유지
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (navItem === "history") {
+      loadHistory();
+    }
+  }, [navItem]);
+
+  const handleHistoryClick = async (item: HistoryItem) => {
+    try {
+      const detail = await fetchHistoryItem(item.id);
+      if (detail.analysis) {
+        setCurrentAnalysis(detail.analysis);
+      }
+    } catch {
+      // 조회 실패 시 무시
+    }
+  };
 
   const filtered = prList.filter(
     (pr) =>
@@ -139,8 +171,85 @@ export function Sidebar() {
       )}
 
       {navItem === "history" && (
-        <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">
-          분석 이력 (준비 중)
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="p-3 border-b border-border flex items-center justify-between">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+              분석 이력 ({history.length})
+            </span>
+            <button
+              onClick={loadHistory}
+              disabled={historyLoading}
+              className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground"
+            >
+              <RefreshCw className={cn("w-3 h-3", historyLoading && "animate-spin")} />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto py-2">
+            {historyLoading && (
+              <div className="flex justify-center py-8">
+                <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
+              </div>
+            )}
+            {!historyLoading && history.length === 0 && (
+              <div className="px-3 py-8 text-center text-muted-foreground text-xs">
+                분석 이력이 없습니다.<br />PR을 분석하면 여기에 저장됩니다.
+              </div>
+            )}
+            {!historyLoading && history.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => handleHistoryClick(item)}
+                className="w-full text-left px-3 py-3 mx-1 rounded-lg hover:bg-muted/50 transition-all"
+              >
+                <div className="flex items-start gap-2">
+                  <div className="mt-0.5 shrink-0">
+                    {item.convention_passed && item.test_passed
+                      ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      : <XCircle className="w-3.5 h-3.5 text-red-400" />
+                    }
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1 mb-0.5">
+                      <span className="text-[10px] text-muted-foreground font-mono">#{item.pr_number}</span>
+                      <span className={cn(
+                        "text-[9px] font-medium uppercase",
+                        item.risk_level === "low" ? "text-emerald-400" :
+                        item.risk_level === "medium" ? "text-amber-400" :
+                        item.risk_level === "high" ? "text-orange-400" : "text-red-400"
+                      )}>
+                        {item.risk_level}
+                      </span>
+                    </div>
+                    <p className="text-xs font-medium text-foreground truncate leading-tight">
+                      {item.pr_title || `PR #${item.pr_number}`}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground truncate">{item.repo}</p>
+                    <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground">
+                      <span>컨벤션 {item.convention_passed ? "✅" : "❌"}</span>
+                      <span>테스트 {item.test_passed ? "✅" : "❌"}</span>
+                      <span className="ml-auto">
+                        {item.created_at
+                          ? formatDistanceToNow(new Date(item.created_at), { locale: ko, addSuffix: true })
+                          : ""}
+                      </span>
+                    </div>
+                  </div>
+                  {item.pr_url && (
+                    <a
+                      href={item.pr_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="shrink-0 mt-0.5 text-muted-foreground hover:text-foreground"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

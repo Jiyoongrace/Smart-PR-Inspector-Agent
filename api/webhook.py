@@ -11,6 +11,9 @@ import logging
 import os
 from typing import AsyncGenerator
 
+from dotenv import load_dotenv
+load_dotenv()  # 프로젝트 루트의 .env 자동 로드
+
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -18,6 +21,7 @@ from prometheus_client import Counter, Histogram, generate_latest
 
 from agents.orchestrator import run_pr_analysis, run_pr_analysis_stream
 from agents.state import AgentState
+from db.history import get_analysis_by_id, get_analysis_by_pr, list_analyses
 from memory.cache import get_cache, set_cache
 
 logger = logging.getLogger(__name__)
@@ -226,6 +230,37 @@ def _github_approve(repo: str, pr_number: int):
         event="APPROVE",
         body="✅ Slack에서 Smart PR Inspector를 통해 승인되었습니다.",
     )
+
+
+# ── 분석 이력 API ──────────────────────────────────────────────────────────
+
+@app.get("/api/history")
+async def get_history(limit: int = 50):
+    """PR 분석 이력 목록 조회 (DB)"""
+    try:
+        records = await asyncio.to_thread(list_analyses, limit)
+        return {"items": records, "total": len(records)}
+    except Exception as e:
+        logger.error(f"이력 조회 실패: {e}")
+        return {"items": [], "total": 0}
+
+
+@app.get("/api/history/{record_id}")
+async def get_history_item(record_id: int):
+    """특정 분석 이력 상세 조회"""
+    record = await asyncio.to_thread(get_analysis_by_id, record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="분석 이력을 찾을 수 없습니다")
+    return record
+
+
+@app.get("/api/history/pr/{repo:path}/{pr_number}")
+async def get_history_by_pr(repo: str, pr_number: int):
+    """레포+PR번호로 최신 분석 결과 조회"""
+    record = await asyncio.to_thread(get_analysis_by_pr, repo, pr_number)
+    if not record:
+        raise HTTPException(status_code=404, detail="분석 이력을 찾을 수 없습니다")
+    return record
 
 
 # ── 모니터링 ──────────────────────────────────────────────────────────────
