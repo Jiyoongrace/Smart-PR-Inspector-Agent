@@ -23,6 +23,7 @@ import axios from "axios";
 import { approvePR, mergePR } from "@/lib/api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import { useAppStore } from "@/store";
 import { cn, getRiskColor, getRiskLabel, formatDuration } from "@/lib/utils";
 import type { ConventionViolation } from "@/lib/types";
@@ -222,7 +223,7 @@ function OverviewTab() {
         <div className="rounded-xl border border-border bg-card p-4">
           <h4 className="text-xs font-semibold mb-3">GitHub 코멘트 미리보기</h4>
           <div className="markdown-body text-xs max-h-64 overflow-y-auto">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
               {currentAnalysis.final_comment}
             </ReactMarkdown>
           </div>
@@ -250,9 +251,16 @@ function PRActionPanel({ pr }: { pr: NonNullable<import("@/lib/types").AgentStat
       await approvePR(pr.repo, pr.pr_number);
       setApproveStatus("done");
     } catch (err: unknown) {
-      const msg = axios.isAxiosError(err)
-        ? err.response?.data?.detail ?? err.message
-        : "승인 실패";
+      let msg = "승인 실패";
+      if (axios.isAxiosError(err)) {
+        const detail: string = err.response?.data?.detail ?? err.message;
+        // GitHub 정책: 자신의 PR은 자신이 승인 불가
+        if (detail.includes("approve your own pull request")) {
+          msg = "자신이 작성한 PR은 직접 승인할 수 없습니다. 다른 팀원에게 요청하세요.";
+        } else {
+          msg = detail;
+        }
+      }
       setErrorMsg(msg);
       setApproveStatus("error");
     } finally {
@@ -638,7 +646,7 @@ function DocsTab() {
   return (
     <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4">
       <div className="markdown-body text-xs">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
           {currentAnalysis.doc_updates}
         </ReactMarkdown>
       </div>
