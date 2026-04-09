@@ -4,7 +4,6 @@ Claude LLM으로 pytest 코드 자동 생성
 """
 
 import logging
-import os
 import re
 import tempfile
 from pathlib import Path
@@ -116,17 +115,14 @@ def _generate_tests_with_llm(
     changed_functions: List[Tuple[str, str]],
     pr_context: dict,
 ) -> str:
-    """Claude LLM을 사용하여 pytest 코드 생성"""
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    """OpenAI LLM을 사용하여 pytest 코드 생성"""
+    from config.llm import call_llm
 
     functions_text = "\n\n".join(
         f"### 함수: {name}\n```python\n{code}\n```"
         for name, code in changed_functions
     )
 
-    # 연결된 이슈가 있으면 버그 재현 테스트 추가 요청
     issue_context = ""
     if pr_context.get("linked_issues"):
         issue_context = f"\nPR이 이슈 #{pr_context['linked_issues']}를 수정합니다. 버그 재현 테스트도 포함하세요."
@@ -154,13 +150,7 @@ PR 제목: {pr_context['title']}
 
 출력 형식: 실행 가능한 pytest 코드만 출력 (마크다운 코드블록 없이):"""
 
-    message = client.messages.create(
-        model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-        max_tokens=2048,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    raw = message.content[0].text
+    raw = call_llm(prompt, max_tokens=2048)
 
     # 코드 블록 추출
     code_match = re.search(r"```python\n([\s\S]+?)\n```", raw)

@@ -98,10 +98,8 @@ def _generate_explanation(
     diff_snippet: str,
     domain_docs: List[str],
 ) -> str:
-    """Claude로 비즈니스 영향도 설명 생성"""
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    """OpenAI로 비즈니스 영향도 설명 생성"""
+    from config.llm import call_llm
 
     domain_context = ""
     if domain_docs:
@@ -122,13 +120,7 @@ PR 제목: {pr_title}
 - 둘째 문장: 사용자/비즈니스에 미치는 영향
 - (있다면) 주의사항"""
 
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=512,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    return message.content[0].text.strip()
+    return call_llm(prompt, max_tokens=512)
 
 
 class DomainDocIngester:

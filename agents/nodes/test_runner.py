@@ -82,6 +82,9 @@ def should_retry(state: AgentState) -> str:
     """재시도 여부 결정 함수 (LangGraph conditional edge용)"""
     if not state.test_result:
         return "fail"
+    if not state.test_result.test_code:
+        # 테스트 코드가 없으면 재시도 불필요 (test_gen 실패 케이스)
+        return "fail"
     if state.test_result.passed:
         return "success"
     if state.test_result.retry_count < MAX_RETRY:
@@ -213,9 +216,7 @@ def _parse_pytest_output(output: str) -> dict:
 def _fix_with_llm(test_code: str, error_log: str, retry_count: int) -> str:
     """LLM으로 실패한 테스트 코드 수정"""
     try:
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        from config.llm import call_llm
 
         prompt = f"""다음 pytest 코드에서 에러가 발생했습니다. 수정된 코드를 반환하세요.
 
@@ -235,13 +236,7 @@ def _fix_with_llm(test_code: str, error_log: str, retry_count: int) -> str:
 - 실행 가능한 코드만 출력 (마크다운 없이)
 - 재시도 {retry_count}회차이므로 이전과 다른 접근 방식 시도"""
 
-        message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=2048,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        raw = message.content[0].text
+        raw = call_llm(prompt, max_tokens=2048)
         code_match = re.search(r"```python\n([\s\S]+?)\n```", raw)
         return code_match.group(1) if code_match else raw.strip()
 

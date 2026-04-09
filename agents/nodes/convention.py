@@ -251,9 +251,7 @@ def _check_function_length(tree: ast.AST, file_path: str) -> List[ConventionViol
 def _llm_check(diff: str) -> List[ConventionViolation]:
     """LLM 보조 컨벤션 분석 (복잡한 패턴)"""
     try:
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        from config.llm import call_llm
 
         rules = _load_conventions()
         prompt = f"""다음 코드 Diff를 분석하여 컨벤션 위반 사항을 JSON 배열로 반환하세요.
@@ -271,13 +269,7 @@ def _llm_check(diff: str) -> List[ConventionViolation]:
 
 위반 사항이 없으면 빈 배열 []을 반환하세요."""
 
-        message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        content = message.content[0].text.strip()
+        content = call_llm(prompt, max_tokens=1024)
         # JSON 추출
         json_match = re.search(r"\[.*\]", content, re.DOTALL)
         if json_match:
