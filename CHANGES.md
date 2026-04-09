@@ -1,5 +1,35 @@
 # CHANGES.md — 버전 이력
 
+## v1.1.0 — 2026-04-09
+
+### 채팅 시스템 개선
+- 채팅 API를 OpenAI (gpt-5.4) → Anthropic Claude (claude-sonnet-4-20250514)로 전환
+- 스트리밍 응답 방식을 Anthropic SDK의 `messages.stream()` 기반으로 변경
+
+### 테스트 탭 UX 개선
+- "검증 결과를 불러오는 중입니다..." 영구 로딩 버그 수정
+- 시나리오 미존재 시 통계 기반 결과 표시 (통과/실패 건수)
+- 코드 기반 테스트 결과의 stdout/stderr 로그 표시 추가
+
+### 워크플로우 인터랙션 추가
+- Agent 워크플로우 노드 클릭 시 해당 분석 탭으로 자동 이동
+- 완료/실패 상태의 노드만 클릭 가능 (hover 효과 포함)
+- 노드-탭 매핑: convention→컨벤션, test→테스트, impact→영향도, doc_sync→문서
+
+### 비즈니스 영향도 분석 (신규)
+- `impact` 노드에 LLM 기반 비즈니스 관점 영향도 분석 추가
+- 시니어 엔지니어 관점의 배포 전 체크리스트 자동 생성
+- 사용자 체감 변화, 비즈니스 리스크, 영향 기능 목록 도출
+- `BusinessImpact` Pydantic 모델 및 프론트엔드 타입 추가
+- `BUSINESS_IMPACT_PROMPT` 프롬프트 템플릿 추가
+- LLM 호출 실패 시 graceful skip (코드 분석 결과 유지)
+
+### 문서 업데이트
+- `docs/features.md` — 코드 영향도 분석에 비즈니스 임팩트 섹션 추가
+- `docs/agent-workflow.md` — impact 노드 설명에 비즈니스 분석 단계 추가
+
+---
+
 ## v1.0.0 — 2026-04-08
 
 ### 초기 릴리즈
