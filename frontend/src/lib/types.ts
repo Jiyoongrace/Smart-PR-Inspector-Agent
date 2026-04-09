@@ -115,6 +115,24 @@ export interface ChatMessage {
   isStreaming?: boolean;
 }
 
+// PR 자동 생성
+export interface CreatePRRequest {
+  repo: string;
+  head: string;
+  base: string;
+  draft: boolean;
+}
+
+export interface CreatePRResult {
+  pr_number: number;
+  pr_url: string;
+  title: string;
+  body: string;
+  head: string;
+  base: string;
+  draft: boolean;
+}
+
 // 노드 메타데이터 (UI 표시용)
 export interface WorkflowNode {
   id: string;

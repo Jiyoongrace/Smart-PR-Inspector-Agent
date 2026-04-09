@@ -1,7 +1,7 @@
 // API 클라이언트 (FastAPI 백엔드 연동)
 
 import axios from "axios";
-import type { AgentState, SSEEvent } from "./types";
+import type { AgentState, SSEEvent, CreatePRRequest, CreatePRResult } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -79,6 +79,38 @@ export async function fetchHistory(limit = 50) {
 export async function fetchHistoryItem(recordId: number) {
   const { data } = await api.get(`/api/history/${recordId}`);
   return data as HistoryItem & { analysis: AgentState };
+}
+
+// PR 승인
+export async function approvePR(repo: string, prNumber: number, comment?: string) {
+  const { data } = await api.post("/api/approve-pr", null, {
+    params: { repo, pr_number: prNumber, comment: comment ?? "" },
+  });
+  return data as { status: string; pr_number: number };
+}
+
+// PR 머지
+export async function mergePR(
+  repo: string,
+  prNumber: number,
+  mergeMethod: "merge" | "squash" | "rebase" = "squash",
+  commitMessage?: string
+) {
+  const { data } = await api.post("/api/merge-pr", null, {
+    params: {
+      repo,
+      pr_number: prNumber,
+      merge_method: mergeMethod,
+      commit_message: commitMessage ?? "",
+    },
+  });
+  return data as { status: string; pr_number: number; sha: string; message: string };
+}
+
+// PR 자동 생성
+export async function createPR(req: CreatePRRequest): Promise<CreatePRResult> {
+  const { data } = await api.post("/api/create-pr", req);
+  return data;
 }
 
 // 헬스체크

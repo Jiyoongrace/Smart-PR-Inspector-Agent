@@ -15,8 +15,12 @@ import {
   FileText,
   Loader2,
   ExternalLink,
+  GitMerge,
+  ThumbsUp,
 } from "lucide-react";
 import { useState } from "react";
+import axios from "axios";
+import { approvePR, mergePR } from "@/lib/api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAppStore } from "@/store";
@@ -223,6 +227,125 @@ function OverviewTab() {
             </ReactMarkdown>
           </div>
         </div>
+      )}
+
+      {/* PR 액션 버튼 */}
+      {currentAnalysis?.pr_data && <PRActionPanel pr={currentAnalysis.pr_data} />}
+    </div>
+  );
+}
+
+function PRActionPanel({ pr }: { pr: NonNullable<import("@/lib/types").AgentState["pr_data"]> }) {
+  const [approveLoading, setApproveLoading] = useState(false);
+  const [mergeLoading, setMergeLoading] = useState(false);
+  const [approveStatus, setApproveStatus] = useState<"idle" | "done" | "error">("idle");
+  const [mergeStatus, setMergeStatus] = useState<"idle" | "done" | "error">("idle");
+  const [mergeMethod, setMergeMethod] = useState<"merge" | "squash" | "rebase">("squash");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const handleApprove = async () => {
+    setApproveLoading(true);
+    setErrorMsg("");
+    try {
+      await approvePR(pr.repo, pr.pr_number);
+      setApproveStatus("done");
+    } catch (err: unknown) {
+      const msg = axios.isAxiosError(err)
+        ? err.response?.data?.detail ?? err.message
+        : "승인 실패";
+      setErrorMsg(msg);
+      setApproveStatus("error");
+    } finally {
+      setApproveLoading(false);
+    }
+  };
+
+  const handleMerge = async () => {
+    setMergeLoading(true);
+    setErrorMsg("");
+    try {
+      await mergePR(pr.repo, pr.pr_number, mergeMethod);
+      setMergeStatus("done");
+    } catch (err: unknown) {
+      const msg = axios.isAxiosError(err)
+        ? err.response?.data?.detail ?? err.message
+        : "머지 실패";
+      setErrorMsg(msg);
+      setMergeStatus("error");
+    } finally {
+      setMergeLoading(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <h4 className="text-xs font-semibold mb-3">PR 액션</h4>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* 승인 버튼 */}
+        <button
+          onClick={handleApprove}
+          disabled={approveLoading || approveStatus === "done"}
+          className={cn(
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+            approveStatus === "done"
+              ? "bg-emerald-500/20 text-emerald-400 cursor-default"
+              : "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50"
+          )}
+        >
+          {approveLoading
+            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            : <ThumbsUp className="w-3.5 h-3.5" />
+          }
+          {approveStatus === "done" ? "승인 완료" : "PR 승인"}
+        </button>
+
+        {/* 머지 방식 선택 */}
+        <select
+          value={mergeMethod}
+          onChange={(e) => setMergeMethod(e.target.value as typeof mergeMethod)}
+          disabled={mergeStatus === "done"}
+          className="bg-muted text-xs text-foreground rounded-lg px-2 py-1.5 outline-none border border-border"
+        >
+          <option value="squash">Squash Merge</option>
+          <option value="merge">Merge Commit</option>
+          <option value="rebase">Rebase Merge</option>
+        </select>
+
+        {/* 머지 버튼 */}
+        <button
+          onClick={handleMerge}
+          disabled={mergeLoading || mergeStatus === "done"}
+          className={cn(
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+            mergeStatus === "done"
+              ? "bg-purple-500/20 text-purple-400 cursor-default"
+              : "bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 disabled:opacity-50"
+          )}
+        >
+          {mergeLoading
+            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            : <GitMerge className="w-3.5 h-3.5" />
+          }
+          {mergeStatus === "done" ? "머지 완료" : "PR 머지"}
+        </button>
+
+        {/* GitHub 링크 */}
+        {pr.pr_url && (
+          <a
+            href={pr.pr_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted transition-all ml-auto"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            GitHub에서 보기
+          </a>
+        )}
+      </div>
+
+      {errorMsg && (
+        <p className="mt-2 text-[10px] text-red-400">{errorMsg}</p>
       )}
     </div>
   );

@@ -15,12 +15,16 @@ import {
   History,
   ExternalLink,
   RefreshCw,
+  GitMerge,
+  GitBranch,
+  Sparkles,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
+import axios from "axios";
 import { useAppStore } from "@/store";
-import { fetchHistory, fetchHistoryItem, type HistoryItem } from "@/lib/api";
-import type { PRListItem, RiskLevel } from "@/lib/types";
+import { fetchHistory, fetchHistoryItem, createPR, type HistoryItem } from "@/lib/api";
+import type { PRListItem, RiskLevel, CreatePRResult } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const RISK_COLORS: Record<RiskLevel, string> = {
@@ -40,7 +44,7 @@ const STATUS_ICONS = {
 export function Sidebar() {
   const { prList, selectedPR, setSelectedPR, setCurrentAnalysis, isSidebarOpen } = useAppStore();
   const [search, setSearch] = useState("");
-  const [navItem, setNavItem] = useState<"prs" | "history" | "settings">("prs");
+  const [navItem, setNavItem] = useState<"prs" | "history" | "create" | "settings">("prs");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
@@ -106,6 +110,7 @@ export function Sidebar() {
         {[
           { id: "prs", icon: <GitPullRequest className="w-4 h-4" />, label: "PRs" },
           { id: "history", icon: <History className="w-4 h-4" />, label: "이력" },
+          { id: "create", icon: <GitMerge className="w-4 h-4" />, label: "생성" },
           { id: "settings", icon: <Settings className="w-4 h-4" />, label: "설정" },
         ].map((item) => (
           <button
@@ -253,6 +258,8 @@ export function Sidebar() {
         </div>
       )}
 
+      {navItem === "create" && <CreatePRPanel />}
+
       {navItem === "settings" && (
         <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">
           설정 (준비 중)
@@ -268,6 +275,156 @@ export function Sidebar() {
         </div>
       </div>
     </motion.aside>
+  );
+}
+
+function CreatePRPanel() {
+  const [repo, setRepo] = useState("");
+  const [head, setHead] = useState("");
+  const [base, setBase] = useState("main");
+  const [draft, setDraft] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<CreatePRResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setResult(null);
+    setError(null);
+    try {
+      const data = await createPR({ repo, head, base, draft });
+      setResult(data);
+    } catch (err: unknown) {
+      let msg = "PR 생성에 실패했습니다";
+      if (axios.isAxiosError(err)) {
+        msg = err.response?.data?.detail ?? err.message ?? msg;
+      } else if (err instanceof Error) {
+        msg = err.message;
+      }
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex-1 flex flex-col overflow-y-auto">
+      <div className="p-3 border-b border-border">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-3.5 h-3.5 text-primary" />
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+            AI PR 자동 생성
+          </span>
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-1">
+          커밋 내역을 분석해 PR 제목과 본문을 자동으로 작성합니다
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="p-3 flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-muted-foreground font-medium">레포지토리</label>
+          <input
+            value={repo}
+            onChange={(e) => setRepo(e.target.value)}
+            placeholder="owner/repo"
+            required
+            className="w-full bg-muted rounded-lg px-3 py-2 text-xs text-foreground placeholder-muted-foreground outline-none focus:ring-1 focus:ring-primary/50"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
+            <GitBranch className="w-3 h-3" /> Head 브랜치 (소스)
+          </label>
+          <input
+            value={head}
+            onChange={(e) => setHead(e.target.value)}
+            placeholder="feature/my-feature"
+            required
+            className="w-full bg-muted rounded-lg px-3 py-2 text-xs text-foreground placeholder-muted-foreground outline-none focus:ring-1 focus:ring-primary/50"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
+            <GitBranch className="w-3 h-3" /> Base 브랜치 (대상)
+          </label>
+          <input
+            value={base}
+            onChange={(e) => setBase(e.target.value)}
+            placeholder="main"
+            required
+            className="w-full bg-muted rounded-lg px-3 py-2 text-xs text-foreground placeholder-muted-foreground outline-none focus:ring-1 focus:ring-primary/50"
+          />
+        </div>
+
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={draft}
+            onChange={(e) => setDraft(e.target.checked)}
+            className="rounded border-border"
+          />
+          <span className="text-xs text-muted-foreground">Draft PR로 생성</span>
+        </label>
+
+        <button
+          type="submit"
+          disabled={loading || !repo || !head || !base}
+          className={cn(
+            "w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-medium transition-all",
+            "bg-primary text-primary-foreground hover:bg-primary/90",
+            "disabled:opacity-50 disabled:cursor-not-allowed"
+          )}
+        >
+          {loading ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              AI가 PR 작성 중...
+            </>
+          ) : (
+            <>
+              <Sparkles className="w-3.5 h-3.5" />
+              PR 생성
+            </>
+          )}
+        </button>
+      </form>
+
+      {error && (
+        <div className="mx-3 mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+          <p className="text-[10px] text-red-400">{error}</p>
+        </div>
+      )}
+
+      {result && (
+        <div className="mx-3 mb-3 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex flex-col gap-2">
+          <div className="flex items-center gap-1.5">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span className="text-[10px] text-emerald-400 font-medium">PR 생성 완료!</span>
+            {result.draft && (
+              <span className="ml-auto text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">
+                Draft
+              </span>
+            )}
+          </div>
+          <p className="text-xs font-medium text-foreground leading-tight">
+            #{result.pr_number} {result.title}
+          </p>
+          <a
+            href={result.pr_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 text-[10px] text-primary hover:underline"
+          >
+            <ExternalLink className="w-3 h-3" />
+            GitHub에서 PR 보기
+          </a>
+        </div>
+      )}
+    </div>
   );
 }
 
