@@ -9,9 +9,10 @@ import re
 import socket
 from datetime import datetime, timezone
 
-from github import Github, GithubException
+from github import GithubException
 
 from agents.state import AgentState, NodeStatus, PRData
+from config.github_app import get_github_client
 
 logger = logging.getLogger(__name__)
 
@@ -21,17 +22,8 @@ def fetch_pr_data_node(state: AgentState) -> AgentState:
     state.node_status.fetch = NodeStatus.RUNNING
     logger.info(f"PR #{state.pr_data.pr_number} 데이터 수집 시작")
 
-    # GITHUB_TOKEN 미설정 조기 검증
-    github_token = os.getenv("GITHUB_TOKEN")
-    if not github_token:
-        state.node_status.fetch = NodeStatus.FAILED
-        state.error_message = "GITHUB_TOKEN 환경변수가 설정되지 않았습니다. .env 파일을 확인하세요."
-        logger.error(state.error_message)
-        return state
-
     try:
-        # timeout=10: 연결 10초, 읽기 30초 — 무한 대기 방지
-        gh = Github(github_token, timeout=10)
+        gh = get_github_client(timeout=10)
         repo_name = state.pr_data.repo
         pr_number = state.pr_data.pr_number
 

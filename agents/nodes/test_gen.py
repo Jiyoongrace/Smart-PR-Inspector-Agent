@@ -1,21 +1,27 @@
 """
-AI 기반 테스트 생성 노드
-Claude LLM으로 pytest 코드 자동 생성
+AI 시나리오 생성 노드
+
+pytest 코드 대신 도메인 전문가도 이해할 수 있는
+Given/When/Then 형식의 테스트 시나리오를 AI로 생성합니다.
 """
 
+import json
 import logging
 import re
-import tempfile
-from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
-from agents.state import AgentState, NodeStatus, TestResult
+from agents.state import AgentState, NodeStatus, TestResult, TestScenario
+from config.prompts import SCENARIO_GENERATION_PROMPT
 
 logger = logging.getLogger(__name__)
 
+# 시나리오 최소/최대 개수
+MIN_SCENARIOS = 3
+MAX_SCENARIOS = 6
+
 
 def test_generator_node(state: AgentState) -> AgentState:
-    """변경된 함수에 대한 pytest 코드 자동 생성"""
+    """PR diff를 분석하여 도메인 친화적 테스트 시나리오 생성"""
     state.node_status.test_gen = NodeStatus.RUNNING
 
     if not state.pr_data or not state.pr_data.diff:
@@ -23,152 +29,94 @@ def test_generator_node(state: AgentState) -> AgentState:
         return state
 
     try:
-        # diff에서 변경된 함수 추출
-        changed_functions = _extract_changed_functions(state.pr_data.diff)
+        scenarios = _generate_scenarios(state)
 
-        if not changed_functions:
-            logger.info("변경된 함수를 찾을 수 없음 - 테스트 생성 스킵")
+        if not scenarios:
+            logger.warning("시나리오 생성 결과가 없음 — 스킵 처리")
             state.node_status.test_gen = NodeStatus.SKIPPED
             state.test_result = TestResult(
                 passed=True,
-                test_code="# 변경된 함수 없음 - 테스트 생성 생략",
-                stdout="no testable functions found",
+                verification_mode="ai_scenario",
+                total_tests=0,
             )
             return state
 
-        # LLM으로 테스트 코드 생성
-        test_code = _generate_tests_with_llm(
-            changed_functions=changed_functions,
-            pr_context={
-                "title": state.pr_data.title,
-                "diff": state.pr_data.diff[:3000],
-                "linked_issues": state.pr_data.linked_issues,
-            }
-        )
-
-        # 임시 파일에 저장 (test_runner가 실행)
-        test_file = _save_test_file(test_code)
-
+        # test_runner가 평가할 수 있도록 TestResult에 시나리오 저장
         state.test_result = TestResult(
-            passed=False,  # 아직 실행 전
-            test_code=test_code,
-            stdout="",
-            stderr="",
-            retry_count=0,
+            passed=False,  # 아직 평가 전
+            verification_mode="ai_scenario",
+            total_tests=len(scenarios),
+            # ScenarioResult 없이 TestScenario만 임시 저장 (직렬화용)
+            # test_runner에서 ScenarioResult로 채워짐
         )
+        # 시나리오를 state에 임시 보관 (test_runner에서 사용)
+        state._pending_scenarios = scenarios  # type: ignore[attr-defined]
+
         state.node_status.test_gen = NodeStatus.SUCCESS
-        logger.info(f"테스트 코드 생성 완료: {len(changed_functions)}개 함수")
+        logger.info(f"시나리오 {len(scenarios)}개 생성 완료")
 
     except Exception as e:
+        logger.error(f"시나리오 생성 실패: {e}")
         state.node_status.test_gen = NodeStatus.FAILED
-        logger.error(f"테스트 생성 실패: {e}")
         state.test_result = TestResult(
             passed=False,
-            test_code="",
+            verification_mode="ai_scenario",
             stderr=str(e),
         )
 
     return state
 
 
-def _extract_changed_functions(diff: str) -> List[Tuple[str, str]]:
-    """
-    diff에서 변경된 Python 함수 시그니처와 본문 추출
-    Returns: List of (function_name, function_code)
-    """
-    functions = []
-    current_file = None
-    added_lines = []
-
-    for line in diff.split("\n"):
-        if line.startswith("+++ b/"):
-            file_path = line[6:]
-            if file_path.endswith(".py"):
-                current_file = file_path
-                added_lines = []
-            else:
-                current_file = None
-            continue
-
-        if current_file:
-            if line.startswith("+") and not line.startswith("+++"):
-                added_lines.append(line[1:])
-
-    # 추가된 라인에서 함수 정의 패턴 검색
-    code_text = "\n".join(added_lines)
-    func_pattern = re.compile(
-        r"(def\s+\w+\s*\([^)]*\)(?:\s*->\s*[^:]+)?:\s*(?:\"\"\"[\s\S]*?\"\"\")?[\s\S]*?)(?=\ndef\s|\Z)",
-        re.MULTILINE,
-    )
-
-    for match in func_pattern.finditer(code_text):
-        func_code = match.group(1).strip()
-        # 함수명 추출
-        name_match = re.search(r"def\s+(\w+)", func_code)
-        if name_match:
-            functions.append((name_match.group(1), func_code[:500]))  # 최대 500자
-
-    return functions[:5]  # 최대 5개 함수만 처리
-
-
-def _generate_tests_with_llm(
-    changed_functions: List[Tuple[str, str]],
-    pr_context: dict,
-) -> str:
-    """OpenAI LLM을 사용하여 pytest 코드 생성"""
+def _generate_scenarios(state: AgentState) -> List[TestScenario]:
+    """SCENARIO_GENERATION_PROMPT로 LLM 호출 → TestScenario 리스트 반환"""
     from config.llm import call_llm
 
-    functions_text = "\n\n".join(
-        f"### 함수: {name}\n```python\n{code}\n```"
-        for name, code in changed_functions
+    pr = state.pr_data
+    issue_context = ""
+    if pr.linked_issues:
+        nums = ", ".join(f"#{n}" for n in pr.linked_issues)
+        issue_context = f"이 PR은 이슈 {nums}를 수정합니다. 버그 재현 시나리오도 포함하세요."
+
+    prompt = SCENARIO_GENERATION_PROMPT.substitute(
+        pr_title=pr.title,
+        pr_body=pr.body[:500] if pr.body else "(없음)",
+        diff_snippet=pr.diff[:4000],
+        issue_context=issue_context,
     )
 
-    issue_context = ""
-    if pr_context.get("linked_issues"):
-        issue_context = f"\nPR이 이슈 #{pr_context['linked_issues']}를 수정합니다. 버그 재현 테스트도 포함하세요."
-
-    prompt = f"""당신은 Python 테스트 전문가입니다. 다음 변경된 함수들에 대한 pytest 테스트 코드를 작성하세요.
-
-PR 제목: {pr_context['title']}
-{issue_context}
-
-변경된 함수들:
-{functions_text}
-
-코드 컨텍스트 (diff):
-```
-{pr_context['diff'][:2000]}
-```
-
-요구사항:
-1. 각 함수에 대해 정상 케이스 2-3개
-2. 예외/오류 케이스 1-2개
-3. 경계값 테스트 1개
-4. pytest.fixture 적극 활용
-5. 테스트명은 `test_함수명_상황` 패턴
-6. 실제 실행 가능한 코드만 작성 (외부 의존성은 mock 처리)
-
-출력 형식: 실행 가능한 pytest 코드만 출력 (마크다운 코드블록 없이):"""
-
     raw = call_llm(prompt, max_tokens=2048)
-
-    # 코드 블록 추출
-    code_match = re.search(r"```python\n([\s\S]+?)\n```", raw)
-    if code_match:
-        return code_match.group(1)
-
-    return raw.strip()
+    return _parse_scenarios(raw)
 
 
-def _save_test_file(test_code: str) -> str:
-    """생성된 테스트 코드를 임시 파일로 저장"""
-    test_dir = Path(tempfile.gettempdir()) / "pr_inspector_tests"
-    test_dir.mkdir(exist_ok=True)
-    test_file = test_dir / "test_generated.py"
+def _parse_scenarios(raw: str) -> List[TestScenario]:
+    """LLM 응답에서 JSON 배열 파싱 → TestScenario 리스트"""
+    # 코드블록 제거
+    cleaned = re.sub(r"```(?:json)?\n?", "", raw).strip().rstrip("`")
 
-    with open(test_file, "w", encoding="utf-8") as f:
-        f.write("# Auto-generated by Smart PR Inspector\n")
-        f.write("import pytest\n\n")
-        f.write(test_code)
+    # JSON 배열 추출
+    match = re.search(r"\[[\s\S]+\]", cleaned)
+    if not match:
+        logger.warning("시나리오 JSON 파싱 실패 — 응답: %s", raw[:200])
+        return []
 
-    return str(test_file)
+    try:
+        data = json.loads(match.group())
+    except json.JSONDecodeError as e:
+        logger.warning("시나리오 JSON 디코딩 실패: %s", e)
+        return []
+
+    scenarios: List[TestScenario] = []
+    for item in data[:MAX_SCENARIOS]:
+        try:
+            scenarios.append(TestScenario(
+                id=str(item.get("id", f"s{len(scenarios)+1}")),
+                title=item.get("title", ""),
+                given=item.get("given", ""),
+                when=item.get("when", ""),
+                then=item.get("then", ""),
+                category=item.get("category", "기능"),
+            ))
+        except Exception as e:
+            logger.debug("시나리오 항목 파싱 오류 — 건너뜀: %s", e)
+
+    return scenarios

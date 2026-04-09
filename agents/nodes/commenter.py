@@ -4,11 +4,9 @@ GitHub PR 코멘트 생성 노드
 """
 
 import logging
-import os
-
-from github import Github
 
 from agents.state import AgentState, NodeStatus
+from config.github_app import get_github_client
 
 logger = logging.getLogger(__name__)
 
@@ -162,39 +160,47 @@ def _build_convention_section(state: AgentState) -> str:
 
 def _build_test_section(state: AgentState) -> str:
     if not state.test_result:
-        return "### 🧪 자동 테스트\n\n> 테스트 생성 대상 없음"
+        return "### 🧪 시나리오 검증\n\n> 검증 대상 없음"
 
     result = state.test_result
-    status = "✅ 통과" if result.passed else "❌ 실패"
+    status = "✅ 통과" if result.passed else "❌ 검토 필요"
+    lines = [f"### 🧪 시나리오 검증 — {status}", ""]
 
-    lines = [f"### 🧪 자동 테스트 — {status}", ""]
+    # AI 시나리오 모드
+    if result.verification_mode == "ai_scenario" and result.scenarios:
+        passed = sum(1 for s in result.scenarios if s.verdict == "pass")
+        failed = sum(1 for s in result.scenarios if s.verdict == "fail")
+        unclear = sum(1 for s in result.scenarios if s.verdict == "unclear")
 
-    if result.total_tests > 0:
-        lines.append(f"- 총 {result.total_tests}개 테스트 중 {result.passed_tests}개 통과")
-        lines.append(f"- 실행 시간: {result.duration_seconds:.1f}초")
+        lines.append(f"총 {len(result.scenarios)}개 시나리오 중 **{passed}개 구현 확인**, {failed}개 미구현, {unclear}개 판단불가")
+        lines.append("")
 
-    if result.retry_count > 0:
-        lines.append(f"- 재시도: {result.retry_count}회")
+        verdict_icons = {"pass": "✅", "fail": "❌", "unclear": "⚠️"}
 
-    if not result.passed and result.stderr:
-        lines.append("")
-        lines.append("<details><summary>오류 로그</summary>")
-        lines.append("")
-        lines.append("```")
-        lines.append(result.stderr[:1000])
-        lines.append("```")
-        lines.append("")
-        lines.append("</details>")
-
-    if result.test_code:
-        lines.append("")
-        lines.append("<details><summary>생성된 테스트 코드</summary>")
-        lines.append("")
-        lines.append("```python")
-        lines.append(result.test_code[:800])
-        lines.append("```")
-        lines.append("")
-        lines.append("</details>")
+        for sr in result.scenarios:
+            icon = verdict_icons.get(sr.verdict, "⚪")
+            lines.append(f"<details><summary>{icon} {sr.scenario.title} [{sr.scenario.category}]</summary>")
+            lines.append("")
+            lines.append(f"- **전제 조건**: {sr.scenario.given}")
+            lines.append(f"- **동작**: {sr.scenario.when}")
+            lines.append(f"- **기대 결과**: {sr.scenario.then}")
+            lines.append("")
+            lines.append(f"**검증 결과**: {sr.reasoning}")
+            if sr.confidence > 0:
+                lines.append(f"*(확신도 {sr.confidence}%)*")
+            lines.append("")
+            lines.append("</details>")
+    else:
+        # 레거시: 코드 실행 방식
+        if result.total_tests > 0:
+            lines.append(f"- 총 {result.total_tests}개 중 {result.passed_tests}개 통과")
+        if not result.passed and result.stderr:
+            lines.append("")
+            lines.append("<details><summary>오류 로그</summary>")
+            lines.append("")
+            lines.append(f"```\n{result.stderr[:500]}\n```")
+            lines.append("")
+            lines.append("</details>")
 
     return "\n".join(lines)
 
@@ -262,11 +268,7 @@ def _build_personalized_section(state: AgentState) -> str:
 
 def _post_github_comment(repo: str, pr_number: int, body: str) -> int:
     """GitHub API로 PR 코멘트 게시"""
-    token = os.getenv("GITHUB_TOKEN")
-    if not token:
-        raise ValueError("GITHUB_TOKEN 환경변수가 설정되지 않음")
-
-    gh = Github(token)
+    gh = get_github_client()
     github_repo = gh.get_repo(repo)
     pr = github_repo.get_pull(pr_number)
     comment = pr.create_issue_comment(body)

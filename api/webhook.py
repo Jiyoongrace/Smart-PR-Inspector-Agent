@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from agents.orchestrator import run_pr_analysis, run_pr_analysis_stream
 from agents.state import AgentState
+from config.github_app import get_github_client
 from db.history import get_analysis_by_id, get_analysis_by_pr, list_analyses
 from memory.cache import get_cache, set_cache
 
@@ -254,28 +255,42 @@ def _parse_button_value(value: str) -> tuple[str, int]:
 
 # ── Slack Interactive Events ──────────────────────────────────────────────
 
-@app.post("/slack/events")
-async def slack_events(request: Request):
-    """Slack Interactive Events 처리 (승인 / 수정 요청 / 링크 클릭)"""
+async def _handle_slack_request(request: Request):
+    """Slack Bolt 핸들러 공통 처리"""
     bot_token = os.getenv("SLACK_BOT_TOKEN")
     signing_secret = os.getenv("SLACK_SIGNING_SECRET")
 
     if not bot_token or not signing_secret:
-        logger.warning("SLACK_BOT_TOKEN / SLACK_SIGNING_SECRET 미설정 — Interactive Events 비활성화")
+        logger.warning("SLACK_BOT_TOKEN / SLACK_SIGNING_SECRET 미설정 — Slack 비활성화")
         return Response(status_code=200)
 
     try:
         handler = _get_slack_handler()
         return await handler.handle(request)
     except Exception as e:
-        logger.error(f"Slack 이벤트 처리 실패: {e}")
+        logger.error(f"Slack 요청 처리 실패: {e}")
         return Response(status_code=200)  # Slack은 항상 200 반환 필요
+
+
+@app.post("/slack/events")
+async def slack_events(request: Request):
+    """Slack Event Subscriptions URL (event_callback 처리)"""
+    return await _handle_slack_request(request)
+
+
+@app.post("/slack/interactions")
+async def slack_interactions(request: Request):
+    """Slack Interactivity Request URL (버튼 클릭 등 Interactive Components 처리)
+
+    Slack 앱 설정 > Interactivity & Shortcuts > Request URL 에 이 경로를 등록해야 합니다.
+    예: https://<your-domain>/slack/interactions
+    """
+    return await _handle_slack_request(request)
 
 
 def _github_approve(repo: str, pr_number: int) -> None:
     """GitHub PR Approve Review 제출"""
-    from github import Github
-    gh = Github(os.getenv("GITHUB_TOKEN"))
+    gh = get_github_client()
     github_repo = gh.get_repo(repo)
     pr = github_repo.get_pull(pr_number)
     pr.create_review(
@@ -286,8 +301,7 @@ def _github_approve(repo: str, pr_number: int) -> None:
 
 def _github_request_changes(repo: str, pr_number: int) -> None:
     """GitHub PR REQUEST_CHANGES Review 제출"""
-    from github import Github
-    gh = Github(os.getenv("GITHUB_TOKEN"))
+    gh = get_github_client()
     github_repo = gh.get_repo(repo)
     pr = github_repo.get_pull(pr_number)
     pr.create_review(
@@ -389,9 +403,9 @@ async def _generate_pr_content(
 async def create_pull_request(req: CreatePRRequest):
     """커밋 목록을 Claude로 요약하여 GitHub PR 자동 생성"""
     try:
-        from github import Github, GithubException
+        from github import GithubException
 
-        gh = Github(os.getenv("GITHUB_TOKEN"))
+        gh = get_github_client()
         try:
             github_repo = gh.get_repo(req.repo)
         except GithubException as e:
@@ -460,8 +474,7 @@ async def create_pull_request(req: CreatePRRequest):
 async def approve_pull_request(repo: str, pr_number: int, comment: str = ""):
     """GitHub PR 승인 (Approve Review 제출)"""
     try:
-        from github import Github, GithubException
-        gh = Github(os.getenv("GITHUB_TOKEN"))
+        gh = get_github_client()
         github_repo = gh.get_repo(repo)
         pr = github_repo.get_pull(pr_number)
         body = comment or "✅ Smart PR Inspector를 통해 승인되었습니다."
@@ -469,8 +482,15 @@ async def approve_pull_request(repo: str, pr_number: int, comment: str = ""):
         logger.info(f"PR #{pr_number} 승인 완료 (repo: {repo})")
         return {"status": "approved", "pr_number": pr_number}
     except Exception as e:
-        logger.error(f"PR 승인 실패: {e}")
-        raise HTTPException(status_code=500, detail=f"PR 승인 실패: {str(e)}")
+        err_str = str(e)
+        logger.error(f"PR 승인 실패: {err_str}")
+        # GitHub 정책: 자신이 작성한 PR은 자신이 승인 불가
+        if "Review Can not approve your own pull request" in err_str or "approve your own pull request" in err_str:
+            raise HTTPException(
+                status_code=422,
+                detail="자신이 작성한 PR은 직접 승인할 수 없습니다 (GitHub 정책). 다른 팀원에게 리뷰를 요청하세요.",
+            )
+        raise HTTPException(status_code=500, detail=f"PR 승인 실패: {err_str}")
 
 
 @app.post("/api/merge-pr")
@@ -482,8 +502,8 @@ async def merge_pull_request(
 ):
     """GitHub PR 머지"""
     try:
-        from github import Github, GithubException
-        gh = Github(os.getenv("GITHUB_TOKEN"))
+        from github import GithubException
+        gh = get_github_client()
         github_repo = gh.get_repo(repo)
         pr = github_repo.get_pull(pr_number)
 
