@@ -18,6 +18,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from prometheus_client import Counter, Histogram, generate_latest
+from pydantic import BaseModel
 
 from agents.orchestrator import run_pr_analysis, run_pr_analysis_stream
 from agents.state import AgentState
@@ -176,52 +177,103 @@ async def get_status(repo: str, pr_number: int):
         return {"status": "not_started"}
 
 
+# ── Slack Bolt App 싱글턴 ────────────────────────────────────────────────
+# 매 요청마다 App을 재생성하면 핸들러 등록이 불안정해지므로,
+# 앱 레벨에서 한 번만 초기화하고 재사용한다.
+
+_slack_bolt_handler = None
+
+
+def _get_slack_handler():
+    """Slack Bolt App 싱글턴 반환 (lazy 초기화)"""
+    global _slack_bolt_handler
+    if _slack_bolt_handler is not None:
+        return _slack_bolt_handler
+
+    from slack_bolt import App
+    from slack_bolt.adapter.fastapi import SlackRequestHandler
+
+    slack_app = App(
+        token=os.getenv("SLACK_BOT_TOKEN"),
+        signing_secret=os.getenv("SLACK_SIGNING_SECRET"),
+    )
+
+    @slack_app.action("approve_pr")
+    def handle_approve(ack, body, client):
+        ack()
+        repo, pr_number = _parse_button_value(body["actions"][0]["value"])
+        try:
+            _github_approve(repo, pr_number)
+            result_text = f"✅ PR #{pr_number} Slack에서 승인 완료"
+        except Exception as e:
+            logger.error(f"GitHub 승인 실패: {e}")
+            result_text = f"❌ PR #{pr_number} 승인 실패: {e}"
+        client.chat_update(
+            channel=body["channel"]["id"],
+            ts=body["message"]["ts"],
+            text=result_text,
+            blocks=[],  # 버튼 블록 제거 (완료 상태)
+        )
+
+    @slack_app.action("request_changes")
+    def handle_request_changes(ack, body, client):
+        ack()
+        repo, pr_number = _parse_button_value(body["actions"][0]["value"])
+        try:
+            _github_request_changes(repo, pr_number)
+            result_text = f"🔄 PR #{pr_number} GitHub에 수정 요청 완료"
+        except Exception as e:
+            logger.error(f"GitHub 수정 요청 실패: {e}")
+            result_text = f"❌ PR #{pr_number} 수정 요청 실패: {e}"
+        client.chat_update(
+            channel=body["channel"]["id"],
+            ts=body["message"]["ts"],
+            text=result_text,
+            blocks=[],  # 버튼 블록 제거 (완료 상태)
+        )
+
+    @slack_app.action("view_pr")
+    def handle_view_pr(ack):
+        # URL 버튼 클릭 시 ack만 처리 (브라우저에서 URL로 이동)
+        ack()
+
+    _slack_bolt_handler = SlackRequestHandler(slack_app)
+    return _slack_bolt_handler
+
+
+def _parse_button_value(value: str) -> tuple[str, int]:
+    """버튼 value에서 (repo, pr_number) 파싱
+    형식: "owner/repo|pr_number"
+    """
+    if "|" in value:
+        repo, pr_num = value.split("|", 1)
+        return repo, int(pr_num)
+    # 구버전 호환: pr_number만 있는 경우
+    return os.getenv("GITHUB_REPO", ""), int(value)
+
+
 # ── Slack Interactive Events ──────────────────────────────────────────────
 
 @app.post("/slack/events")
 async def slack_events(request: Request):
-    """Slack Interactive Events 처리"""
+    """Slack Interactive Events 처리 (승인 / 수정 요청 / 링크 클릭)"""
+    bot_token = os.getenv("SLACK_BOT_TOKEN")
+    signing_secret = os.getenv("SLACK_SIGNING_SECRET")
+
+    if not bot_token or not signing_secret:
+        logger.warning("SLACK_BOT_TOKEN / SLACK_SIGNING_SECRET 미설정 — Interactive Events 비활성화")
+        return Response(status_code=200)
+
     try:
-        from slack_bolt.adapter.fastapi import SlackRequestHandler
-        from slack_bolt import App
-
-        slack_app = App(
-            token=os.getenv("SLACK_BOT_TOKEN"),
-            signing_secret=os.getenv("SLACK_SIGNING_SECRET"),
-        )
-
-        @slack_app.action("approve_pr")
-        def handle_approve(ack, body, client):
-            ack()
-            pr_number = int(body["actions"][0]["value"])
-            repo = os.getenv("GITHUB_REPO", "")
-            _github_approve(repo, pr_number)
-            client.chat_update(
-                channel=body["channel"]["id"],
-                ts=body["message"]["ts"],
-                text=f"✅ PR #{pr_number} Slack에서 승인 완료",
-            )
-
-        @slack_app.action("request_changes")
-        def handle_request_changes(ack, body, client):
-            ack()
-            pr_number = int(body["actions"][0]["value"])
-            client.chat_update(
-                channel=body["channel"]["id"],
-                ts=body["message"]["ts"],
-                text=f"🔄 PR #{pr_number} 수정 요청됨",
-            )
-
-        handler = SlackRequestHandler(slack_app)
+        handler = _get_slack_handler()
         return await handler.handle(request)
-
     except Exception as e:
         logger.error(f"Slack 이벤트 처리 실패: {e}")
         return Response(status_code=200)  # Slack은 항상 200 반환 필요
 
 
-def _github_approve(repo: str, pr_number: int):
-    """GitHub PR 승인"""
+def _github_approve(repo: str, pr_number: int) -> None:
+    """GitHub PR Approve Review 제출"""
     from github import Github
     gh = Github(os.getenv("GITHUB_TOKEN"))
     github_repo = gh.get_repo(repo)
@@ -229,6 +281,18 @@ def _github_approve(repo: str, pr_number: int):
     pr.create_review(
         event="APPROVE",
         body="✅ Slack에서 Smart PR Inspector를 통해 승인되었습니다.",
+    )
+
+
+def _github_request_changes(repo: str, pr_number: int) -> None:
+    """GitHub PR REQUEST_CHANGES Review 제출"""
+    from github import Github
+    gh = Github(os.getenv("GITHUB_TOKEN"))
+    github_repo = gh.get_repo(repo)
+    pr = github_repo.get_pull(pr_number)
+    pr.create_review(
+        event="REQUEST_CHANGES",
+        body="🔄 Slack에서 Smart PR Inspector를 통해 수정 요청되었습니다.",
     )
 
 
@@ -261,6 +325,182 @@ async def get_history_by_pr(repo: str, pr_number: int):
     if not record:
         raise HTTPException(status_code=404, detail="분석 이력을 찾을 수 없습니다")
     return record
+
+
+# ── PR 자동 생성 ─────────────────────────────────────────────────────────
+
+class CreatePRRequest(BaseModel):
+    """PR 생성 요청 모델"""
+    repo: str
+    head: str
+    base: str = "main"
+    draft: bool = False
+
+
+async def _generate_pr_content(
+    repo: str,
+    head: str,
+    base: str,
+    commits: list,
+    commit_messages: str,
+) -> tuple[str, str]:
+    """Claude로 PR 제목/본문 생성, 실패 시 커밋 기반 폴백"""
+    try:
+        from config.llm import call_llm
+        from config.prompts import PR_CREATION_PROMPT
+
+        prompt = PR_CREATION_PROMPT.substitute(
+            repo=repo,
+            head=head,
+            base=base,
+            commit_count=len(commits),
+            commits=commit_messages,
+        )
+        generated = call_llm(prompt, max_tokens=1024)
+
+        # TITLE: / BODY: 파싱
+        title = ""
+        body_lines: list[str] = []
+        in_body = False
+        for line in generated.split("\n"):
+            if line.startswith("TITLE:"):
+                title = line.replace("TITLE:", "").strip()
+            elif line.startswith("BODY:"):
+                in_body = True
+            elif in_body:
+                body_lines.append(line)
+
+        if not title:
+            title = generated.split("\n")[0].strip() or f"{head} → {base}"
+        body = "\n".join(body_lines).strip() if body_lines else generated
+        return title, body
+
+    except Exception as e:
+        # Claude 실패 시 커밋 메시지 기반으로 자동 생성
+        logger.warning(f"Claude PR 생성 실패, 폴백 사용: {e}")
+        first_msg = commits[0].commit.message.split("\n")[0][:70] if commits else f"{head} → {base}"
+        title = first_msg
+        body = f"## 변경 사항\n\n{commit_messages}\n\n## 체크리스트\n- [ ] 코드 리뷰 완료\n- [ ] 테스트 통과 확인"
+        return title, body
+
+
+@app.post("/api/create-pr")
+async def create_pull_request(req: CreatePRRequest):
+    """커밋 목록을 Claude로 요약하여 GitHub PR 자동 생성"""
+    try:
+        from github import Github, GithubException
+
+        gh = Github(os.getenv("GITHUB_TOKEN"))
+        try:
+            github_repo = gh.get_repo(req.repo)
+        except GithubException as e:
+            raise HTTPException(status_code=404, detail=f"레포지토리를 찾을 수 없습니다: {req.repo}")
+
+        # base와 head 사이의 커밋 수집
+        try:
+            comparison = github_repo.compare(req.base, req.head)
+            commits = list(comparison.commits)
+        except GithubException as e:
+            raise HTTPException(status_code=400, detail=f"브랜치 비교 실패: {str(e)}")
+
+        if not commits:
+            raise HTTPException(status_code=400, detail="두 브랜치 사이에 새로운 커밋이 없습니다")
+
+        # 커밋 메시지 정리 (첫 줄만, 최대 50개)
+        commit_messages = "\n".join([
+            f"- {c.commit.message.split(chr(10))[0][:100]} ({c.sha[:7]})"
+            for c in commits[:50]
+        ])
+
+        # Claude로 PR 제목 + 본문 생성 (실패 시 커밋 기반 폴백)
+        title, body = await _generate_pr_content(
+            repo=req.repo,
+            head=req.head,
+            base=req.base,
+            commits=commits,
+            commit_messages=commit_messages,
+        )
+
+        # GitHub PR 생성
+        try:
+            pr = github_repo.create_pull(
+                title=title,
+                body=body,
+                head=req.head,
+                base=req.base,
+                draft=req.draft,
+            )
+        except GithubException as e:
+            detail = e.data.get("message", str(e)) if isinstance(e.data, dict) else str(e)
+            raise HTTPException(status_code=422, detail=f"PR 생성 실패: {detail}")
+
+        logger.info(f"PR #{pr.number} 생성 완료: {req.repo} ({req.head} → {req.base})")
+
+        return {
+            "pr_number": pr.number,
+            "pr_url": pr.html_url,
+            "title": pr.title,
+            "body": pr.body,
+            "head": req.head,
+            "base": req.base,
+            "draft": req.draft,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"PR 생성 중 예기치 않은 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"서버 오류: {str(e)}")
+
+
+# ── PR 승인 / 머지 ────────────────────────────────────────────────────────
+
+@app.post("/api/approve-pr")
+async def approve_pull_request(repo: str, pr_number: int, comment: str = ""):
+    """GitHub PR 승인 (Approve Review 제출)"""
+    try:
+        from github import Github, GithubException
+        gh = Github(os.getenv("GITHUB_TOKEN"))
+        github_repo = gh.get_repo(repo)
+        pr = github_repo.get_pull(pr_number)
+        body = comment or "✅ Smart PR Inspector를 통해 승인되었습니다."
+        pr.create_review(event="APPROVE", body=body)
+        logger.info(f"PR #{pr_number} 승인 완료 (repo: {repo})")
+        return {"status": "approved", "pr_number": pr_number}
+    except Exception as e:
+        logger.error(f"PR 승인 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"PR 승인 실패: {str(e)}")
+
+
+@app.post("/api/merge-pr")
+async def merge_pull_request(
+    repo: str,
+    pr_number: int,
+    merge_method: str = "squash",
+    commit_message: str = "",
+):
+    """GitHub PR 머지"""
+    try:
+        from github import Github, GithubException
+        gh = Github(os.getenv("GITHUB_TOKEN"))
+        github_repo = gh.get_repo(repo)
+        pr = github_repo.get_pull(pr_number)
+
+        if not pr.mergeable:
+            raise HTTPException(status_code=409, detail="PR을 머지할 수 없습니다 (충돌 또는 필수 체크 미통과)")
+
+        merge_msg = commit_message or f"Merge PR #{pr_number}: {pr.title}"
+        result = pr.merge(
+            commit_message=merge_msg,
+            merge_method=merge_method,  # merge | squash | rebase
+        )
+        logger.info(f"PR #{pr_number} 머지 완료 (repo: {repo}, SHA: {result.sha})")
+        return {"status": "merged", "pr_number": pr_number, "sha": result.sha, "message": result.message}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"PR 머지 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"PR 머지 실패: {str(e)}")
 
 
 # ── 모니터링 ──────────────────────────────────────────────────────────────
