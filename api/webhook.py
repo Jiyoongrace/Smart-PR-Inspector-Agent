@@ -532,6 +532,25 @@ async def metrics():
     return Response(generate_latest(), media_type="text/plain")
 
 
+# ── RAG 검색 API ─────────────────────────────────────────────────────────────
+
+@app.get("/api/rag/search")
+async def rag_search(query: str, n_results: int = 3):
+    """도메인 문서 벡터 검색 (채팅/외부 연동용)"""
+    try:
+        from agents.nodes.domain_explainer import _search_domain_docs
+        docs, sources = _search_domain_docs(query)
+        return {
+            "documents": docs,
+            "sources": sources,
+            "count": len(docs),
+            "rag_used": len(docs) > 0,
+        }
+    except Exception as e:
+        logger.warning(f"RAG 검색 실패: {e}")
+        return {"documents": [], "sources": [], "count": 0, "rag_used": False}
+
+
 @app.get("/health")
 async def health():
     """헬스체크"""
