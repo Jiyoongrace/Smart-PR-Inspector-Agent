@@ -54,9 +54,35 @@ class ConventionResult(BaseModel):
     summary: str = ""
 
 
+class ScenarioVerdict(str, Enum):
+    """AI 시나리오 검증 결과"""
+    PASS = "pass"
+    FAIL = "fail"
+    UNCLEAR = "unclear"
+
+
+class TestScenario(BaseModel):
+    """도메인 전문가도 이해할 수 있는 테스트 시나리오 (Given/When/Then)"""
+    id: str
+    title: str          # 한 줄 요약 (예: "PR 분석 요청 시 결과 반환")
+    given: str          # 전제 조건
+    when: str           # 동작
+    then: str           # 기대 결과
+    category: str = ""  # 기능 | 예외 | 경계값 | 보안
+
+
+class ScenarioResult(BaseModel):
+    """AI가 평가한 시나리오별 검증 결과"""
+    scenario: TestScenario
+    verdict: ScenarioVerdict
+    reasoning: str      # AI 판단 근거 (한국어 평문)
+    confidence: int = 0  # 0-100, AI 확신도
+
+
 class TestResult(BaseModel):
-    """테스트 생성 및 실행 결과"""
+    """테스트 검증 결과 (AI 시나리오 방식)"""
     passed: bool = False
+    # 코드 실행 방식 호환 필드 (레거시)
     test_code: str = ""
     stdout: str = ""
     stderr: str = ""
@@ -65,6 +91,9 @@ class TestResult(BaseModel):
     passed_tests: int = 0
     failed_tests: int = 0
     duration_seconds: float = 0.0
+    # AI 시나리오 검증 결과
+    scenarios: List[ScenarioResult] = Field(default_factory=list)
+    verification_mode: str = "ai_scenario"  # "ai_scenario" | "code"
 
 
 class ImpactAnalysis(BaseModel):

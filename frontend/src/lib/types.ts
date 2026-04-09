@@ -31,6 +31,24 @@ export interface ConventionResult {
   summary: string;
 }
 
+export type ScenarioVerdict = "pass" | "fail" | "unclear";
+
+export interface TestScenario {
+  id: string;
+  title: string;
+  given: string;
+  when: string;
+  then: string;
+  category: string;
+}
+
+export interface ScenarioResult {
+  scenario: TestScenario;
+  verdict: ScenarioVerdict;
+  reasoning: string;
+  confidence: number;
+}
+
 export interface TestResult {
   passed: boolean;
   test_code: string;
@@ -41,6 +59,9 @@ export interface TestResult {
   passed_tests: number;
   failed_tests: number;
   duration_seconds: number;
+  // AI 시나리오 검증 결과
+  scenarios: ScenarioResult[];
+  verification_mode: "ai_scenario" | "code";
 }
 
 export interface ImpactAnalysis {

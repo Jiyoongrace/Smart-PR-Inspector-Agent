@@ -1,245 +1,158 @@
 """
-테스트 실행 노드
-Docker 격리 환경에서 pytest 실행 + 재시도 로직
+AI 시나리오 검증 노드
+
+코드 실행 없이 LLM이 각 시나리오를 코드 변경(diff)과 대조하여 평가합니다.
+도메인 전문가가 이해할 수 있는 평문 결과를 제공합니다.
 """
 
+import json
 import logging
-import os
 import re
-import subprocess
-import tempfile
 import time
-from pathlib import Path
+from typing import List
 
-from agents.state import AgentState, NodeStatus, TestResult
+from agents.state import (
+    AgentState,
+    NodeStatus,
+    ScenarioResult,
+    ScenarioVerdict,
+    TestResult,
+    TestScenario,
+)
+from config.prompts import SCENARIO_EVALUATION_PROMPT
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRY = 1  # 재시도 1회로 제한 (속도 우선)
-TIMEOUT_SECONDS = 30  # 30초 (Docker pull 대기 제거)
+# 시나리오당 LLM 호출 타임아웃(초)
+EVAL_TIMEOUT = 30
+# 통과 기준: 전체의 몇 % 이상이 pass여야 전체 PASS
+PASS_THRESHOLD = 0.6
 
 
 def test_runner_node(state: AgentState) -> AgentState:
-    """pytest를 Docker 또는 로컬 환경에서 실행"""
+    """생성된 시나리오를 AI로 평가하여 ScenarioResult 목록 생성"""
     state.node_status.test_run = NodeStatus.RUNNING
 
-    if not state.test_result or not state.test_result.test_code:
+    # 시나리오가 없으면 스킵
+    pending: List[TestScenario] = getattr(state, "_pending_scenarios", [])
+    if not pending or not state.pr_data:
         state.node_status.test_run = NodeStatus.SKIPPED
         return state
 
-    # 테스트 파일 저장
-    test_file = _save_temp_test(state.test_result.test_code)
+    diff = state.pr_data.diff[:6000]  # LLM 컨텍스트 절약
+    start = time.time()
 
-    start_time = time.time()
+    results: List[ScenarioResult] = []
+    for scenario in pending:
+        result = _evaluate_scenario(scenario, diff)
+        results.append(result)
+        logger.debug(
+            "시나리오 [%s] %s — %s",
+            scenario.id, result.verdict, scenario.title
+        )
 
-    # 로컬 실행 우선 (Docker는 초기 이미지 pull로 느림)
-    # ENABLE_DOCKER_TESTS=true 환경변수로 명시 활성화 가능
-    use_docker = os.getenv("ENABLE_DOCKER_TESTS", "false").lower() == "true" and _check_docker_available()
+    duration = round(time.time() - start, 2)
 
-    if use_docker:
-        result = _run_with_docker(test_file)
-    else:
-        result = _run_locally(test_file)
+    passed_count = sum(1 for r in results if r.verdict == ScenarioVerdict.PASS)
+    failed_count = sum(1 for r in results if r.verdict == ScenarioVerdict.FAIL)
+    unclear_count = sum(1 for r in results if r.verdict == ScenarioVerdict.UNCLEAR)
+    total = len(results)
+    overall_passed = total > 0 and (passed_count / total) >= PASS_THRESHOLD
 
-    duration = time.time() - start_time
-    result.duration_seconds = round(duration, 2)
-    result.retry_count = state.test_result.retry_count
-    result.test_code = state.test_result.test_code
+    state.test_result = TestResult(
+        passed=overall_passed,
+        verification_mode="ai_scenario",
+        total_tests=total,
+        passed_tests=passed_count,
+        failed_tests=failed_count + unclear_count,
+        duration_seconds=duration,
+        scenarios=results,
+    )
 
-    state.test_result = result
-    state.node_status.test_run = NodeStatus.SUCCESS if result.passed else NodeStatus.FAILED
-
+    state.node_status.test_run = (
+        NodeStatus.SUCCESS if overall_passed else NodeStatus.FAILED
+    )
     logger.info(
-        f"테스트 실행 완료: {'통과' if result.passed else '실패'} "
-        f"({result.passed_tests}/{result.total_tests}, {duration:.1f}초)"
+        "시나리오 검증 완료: %d/%d 통과, %.1f초",
+        passed_count, total, duration,
     )
     return state
 
 
 def fix_test_code_node(state: AgentState) -> AgentState:
-    """테스트 실패 시 LLM으로 코드 수정 후 재시도"""
-    if not state.test_result:
-        return state
-
-    retry_count = state.test_result.retry_count + 1
-    logger.info(f"테스트 코드 수정 중 (재시도 {retry_count}/{MAX_RETRY})")
-
-    fixed_code = _fix_with_llm(
-        test_code=state.test_result.test_code,
-        error_log=state.test_result.stderr,
-        retry_count=retry_count,
-    )
-
-    state.test_result = TestResult(
-        passed=False,
-        test_code=fixed_code,
-        retry_count=retry_count,
-    )
+    """AI 시나리오 방식에서는 재시도 불필요 — 노-옵"""
     return state
 
 
 def should_retry(state: AgentState) -> str:
-    """재시도 여부 결정 함수 (LangGraph conditional edge용)"""
+    """LangGraph conditional edge: 시나리오 방식은 재시도 없이 바로 완료"""
     if not state.test_result:
         return "fail"
-    if not state.test_result.test_code:
-        # 테스트 코드가 없으면 재시도 불필요 (test_gen 실패 케이스)
-        return "fail"
-    if state.test_result.passed:
-        return "success"
-    if state.test_result.retry_count < MAX_RETRY:
-        return "retry"
-    return "fail"
+    return "success" if state.test_result.passed else "fail"
 
 
-def _save_temp_test(test_code: str) -> str:
-    test_dir = Path(tempfile.gettempdir()) / "pr_inspector_tests"
-    test_dir.mkdir(exist_ok=True)
-    test_file = test_dir / "test_generated.py"
-    with open(test_file, "w", encoding="utf-8") as f:
-        f.write(test_code)
-    return str(test_file)
+# ── 내부 함수 ─────────────────────────────────────────────────────────────
 
-
-def _check_docker_available() -> bool:
-    try:
-        result = subprocess.run(
-            ["docker", "info"],
-            capture_output=True,
-            timeout=5,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
-
-
-def _run_with_docker(test_file: str) -> TestResult:
-    """Docker 컨테이너에서 격리 실행"""
-    try:
-        import docker
-
-        client = docker.from_env()
-        test_dir = str(Path(test_file).parent)
-
-        container = client.containers.run(
-            image="python:3.11-slim",
-            command=f"bash -c 'pip install pytest pytest-timeout -q && pytest /tests/test_generated.py -v --tb=short --timeout=60'",
-            volumes={
-                test_dir: {"bind": "/tests", "mode": "rw"}
-            },
-            detach=True,
-            mem_limit="256m",
-            cpu_period=100000,
-            cpu_quota=50000,  # 50% CPU
-        )
-
-        exit_code = container.wait(timeout=TIMEOUT_SECONDS)
-        logs = container.logs().decode("utf-8", errors="replace")
-        container.remove(force=True)
-
-        passed = exit_code["StatusCode"] == 0
-        stats = _parse_pytest_output(logs)
-
-        return TestResult(
-            passed=passed,
-            stdout=logs if passed else "",
-            stderr=logs if not passed else "",
-            total_tests=stats["total"],
-            passed_tests=stats["passed"],
-            failed_tests=stats["failed"],
-        )
-
-    except Exception as e:
-        logger.warning(f"Docker 실행 실패, 로컬로 폴백: {e}")
-        return _run_locally(test_file)
-
-
-def _run_locally(test_file: str) -> TestResult:
-    """로컬 환경에서 pytest 실행"""
-    try:
-        result = subprocess.run(
-            ["python", "-m", "pytest", test_file, "-v", "--tb=short", "--timeout=60"],
-            capture_output=True,
-            text=True,
-            timeout=TIMEOUT_SECONDS,
-        )
-
-        passed = result.returncode == 0
-        output = result.stdout + result.stderr
-        stats = _parse_pytest_output(output)
-
-        return TestResult(
-            passed=passed,
-            stdout=result.stdout,
-            stderr=result.stderr,
-            total_tests=stats["total"],
-            passed_tests=stats["passed"],
-            failed_tests=stats["failed"],
-        )
-
-    except subprocess.TimeoutExpired:
-        return TestResult(
-            passed=False,
-            stderr=f"테스트 타임아웃: {TIMEOUT_SECONDS}초 초과",
-        )
-    except Exception as e:
-        return TestResult(
-            passed=False,
-            stderr=str(e),
-        )
-
-
-def _parse_pytest_output(output: str) -> dict:
-    """pytest 출력에서 통계 추출"""
-    stats = {"total": 0, "passed": 0, "failed": 0}
-
-    # "3 passed, 1 failed" 패턴
-    match = re.search(r"(\d+) passed", output)
-    if match:
-        stats["passed"] = int(match.group(1))
-
-    match = re.search(r"(\d+) failed", output)
-    if match:
-        stats["failed"] = int(match.group(1))
-
-    stats["total"] = stats["passed"] + stats["failed"]
-
-    # "5 passed" 단독 패턴
-    match = re.search(r"(\d+) passed", output)
-    if match and stats["total"] == 0:
-        stats["passed"] = int(match.group(1))
-        stats["total"] = stats["passed"]
-
-    return stats
-
-
-def _fix_with_llm(test_code: str, error_log: str, retry_count: int) -> str:
-    """LLM으로 실패한 테스트 코드 수정"""
+def _evaluate_scenario(scenario: TestScenario, diff: str) -> ScenarioResult:
+    """LLM 한 번 호출로 시나리오 평가 → ScenarioResult 반환"""
     try:
         from config.llm import call_llm
 
-        prompt = f"""다음 pytest 코드에서 에러가 발생했습니다. 수정된 코드를 반환하세요.
+        prompt = SCENARIO_EVALUATION_PROMPT.substitute(
+            diff=diff,
+            title=scenario.title,
+            given=scenario.given,
+            when=scenario.when,
+            then=scenario.then,
+        )
 
-원본 테스트 코드:
-```python
-{test_code[:2000]}
-```
-
-에러 로그:
-```
-{error_log[:1000]}
-```
-
-지침:
-- import 오류는 mock으로 처리
-- 외부 의존성은 pytest.fixture + unittest.mock 활용
-- 실행 가능한 코드만 출력 (마크다운 없이)
-- 재시도 {retry_count}회차이므로 이전과 다른 접근 방식 시도"""
-
-        raw = call_llm(prompt, max_tokens=2048)
-        code_match = re.search(r"```python\n([\s\S]+?)\n```", raw)
-        return code_match.group(1) if code_match else raw.strip()
+        raw = call_llm(prompt, max_tokens=512)
+        return _parse_evaluation(scenario, raw)
 
     except Exception as e:
-        logger.error(f"LLM 코드 수정 실패: {e}")
-        return test_code  # 원본 반환
+        logger.error("시나리오 [%s] 평가 실패: %s", scenario.id, e)
+        return ScenarioResult(
+            scenario=scenario,
+            verdict=ScenarioVerdict.UNCLEAR,
+            reasoning=f"평가 중 오류가 발생했습니다: {e}",
+            confidence=0,
+        )
+
+
+def _parse_evaluation(scenario: TestScenario, raw: str) -> ScenarioResult:
+    """LLM 응답 JSON 파싱 → ScenarioResult"""
+    cleaned = re.sub(r"```(?:json)?\n?", "", raw).strip().rstrip("`")
+
+    match = re.search(r"\{[\s\S]+\}", cleaned)
+    if not match:
+        return ScenarioResult(
+            scenario=scenario,
+            verdict=ScenarioVerdict.UNCLEAR,
+            reasoning="AI 응답을 파싱할 수 없었습니다.",
+            confidence=0,
+        )
+
+    try:
+        data = json.loads(match.group())
+        raw_verdict = str(data.get("verdict", "unclear")).lower()
+        verdict_map = {
+            "pass": ScenarioVerdict.PASS,
+            "fail": ScenarioVerdict.FAIL,
+            "unclear": ScenarioVerdict.UNCLEAR,
+        }
+        verdict = verdict_map.get(raw_verdict, ScenarioVerdict.UNCLEAR)
+
+        return ScenarioResult(
+            scenario=scenario,
+            verdict=verdict,
+            reasoning=data.get("reasoning", ""),
+            confidence=int(data.get("confidence", 50)),
+        )
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning("평가 JSON 디코딩 실패: %s — raw: %s", e, raw[:100])
+        return ScenarioResult(
+            scenario=scenario,
+            verdict=ScenarioVerdict.UNCLEAR,
+            reasoning="응답 형식 오류로 판단할 수 없습니다.",
+            confidence=0,
+        )

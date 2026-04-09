@@ -26,7 +26,7 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { useAppStore } from "@/store";
 import { cn, getRiskColor, getRiskLabel, formatDuration } from "@/lib/utils";
-import type { ConventionViolation } from "@/lib/types";
+import type { ConventionViolation, ScenarioResult } from "@/lib/types";
 
 const SEVERITY_CONFIG = {
   error: {
@@ -459,15 +459,80 @@ function ConventionTab() {
 function TestsTab() {
   const { currentAnalysis } = useAppStore();
   const result = currentAnalysis?.test_result;
-  const [showCode, setShowCode] = useState(false);
 
   if (!result) {
-    return <PlaceholderSection label="테스트 결과를 기다리는 중..." />;
+    return <PlaceholderSection label="테스트 시나리오를 생성하는 중..." />;
   }
+
+  const isScenarioMode =
+    result.verification_mode === "ai_scenario" && result.scenarios?.length > 0;
+
+  if (isScenarioMode) {
+    return <ScenarioView result={result} />;
+  }
+
+  // 시나리오 없이 통계만 있는 경우 (스킵/오류)
+  return (
+    <div className="space-y-4">
+      <div className={cn(
+        "p-4 rounded-xl border",
+        result.passed
+          ? "bg-emerald-500/10 border-emerald-500/20"
+          : "bg-amber-500/10 border-amber-500/20"
+      )}>
+        <div className="flex items-center gap-3">
+          {result.passed
+            ? <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+            : <Info className="w-5 h-5 text-amber-400" />
+          }
+          <p className="text-sm font-medium text-muted-foreground">
+            {result.total_tests === 0
+              ? "검증할 시나리오가 없습니다 (변경사항이 충분하지 않음)"
+              : "검증 결과를 불러오는 중입니다..."}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const VERDICT_CONFIG = {
+  pass: {
+    icon: <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />,
+    badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    border: "border-emerald-500/20 bg-emerald-500/5",
+    label: "구현됨",
+  },
+  fail: {
+    icon: <XCircle className="w-4 h-4 text-red-400 shrink-0" />,
+    badge: "bg-red-500/10 text-red-400 border-red-500/20",
+    border: "border-red-500/20 bg-red-500/5",
+    label: "미구현",
+  },
+  unclear: {
+    icon: <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />,
+    badge: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    border: "border-amber-500/20 bg-amber-500/5",
+    label: "판단 불가",
+  },
+};
+
+const CATEGORY_COLORS: Record<string, string> = {
+  기능: "bg-blue-500/10 text-blue-400",
+  예외: "bg-red-500/10 text-red-400",
+  경계값: "bg-purple-500/10 text-purple-400",
+  보안: "bg-orange-500/10 text-orange-400",
+};
+
+function ScenarioView({ result }: { result: NonNullable<import("@/lib/types").TestResult> }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const passCount = result.scenarios.filter((r) => r.verdict === "pass").length;
+  const failCount = result.scenarios.filter((r) => r.verdict === "fail").length;
+  const unclearCount = result.scenarios.filter((r) => r.verdict === "unclear").length;
 
   return (
     <div className="space-y-4">
-      {/* 결과 요약 */}
+      {/* 전체 요약 */}
       <div className={cn(
         "p-4 rounded-xl border",
         result.passed
@@ -479,65 +544,116 @@ function TestsTab() {
             ? <CheckCircle2 className="w-5 h-5 text-emerald-400" />
             : <XCircle className="w-5 h-5 text-red-400" />
           }
-          <p className="text-sm font-medium">
-            {result.passed ? "테스트 통과" : "테스트 실패"}
-          </p>
+          <div>
+            <p className="text-sm font-medium">
+              {result.passed ? "시나리오 검증 통과" : "검증 실패 — 확인이 필요합니다"}
+            </p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              AI가 코드 변경을 분석하여 각 시나리오를 검증했습니다
+            </p>
+          </div>
         </div>
 
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: "전체", value: result.total_tests, color: "text-foreground" },
-            { label: "통과", value: result.passed_tests, color: "text-emerald-400" },
-            { label: "실패", value: result.failed_tests, color: "text-red-400" },
-          ].map((stat) => (
-            <div key={stat.label} className="text-center">
-              <p className={cn("text-xl font-bold", stat.color)}>{stat.value}</p>
-              <p className="text-[10px] text-muted-foreground">{stat.label}</p>
+            { label: "구현됨", value: passCount, color: "text-emerald-400" },
+            { label: "미구현", value: failCount, color: "text-red-400" },
+            { label: "판단불가", value: unclearCount, color: "text-amber-400" },
+          ].map((s) => (
+            <div key={s.label} className="text-center">
+              <p className={cn("text-xl font-bold", s.color)}>{s.value}</p>
+              <p className="text-[10px] text-muted-foreground">{s.label}</p>
             </div>
           ))}
         </div>
 
-        <div className="flex gap-3 mt-3 text-xs text-muted-foreground">
-          <span>실행 시간: {formatDuration(result.duration_seconds)}</span>
-          {result.retry_count > 0 && (
-            <span>재시도: {result.retry_count}회</span>
-          )}
-        </div>
+        {result.duration_seconds > 0 && (
+          <p className="text-[10px] text-muted-foreground mt-3">
+            검증 시간: {formatDuration(result.duration_seconds)}
+          </p>
+        )}
       </div>
 
-      {/* 오류 로그 */}
-      {!result.passed && result.stderr && (
-        <div className="rounded-xl border border-red-400/20 bg-red-400/5">
-          <div className="px-4 py-3 border-b border-red-400/20">
-            <p className="text-xs font-medium text-red-400">오류 로그</p>
-          </div>
-          <pre className="p-4 text-[11px] font-mono text-muted-foreground overflow-auto max-h-48">
-            {result.stderr.slice(0, 1500)}
-          </pre>
-        </div>
-      )}
+      {/* 시나리오 카드 목록 */}
+      <div className="space-y-2">
+        {result.scenarios.map((r: ScenarioResult) => {
+          const cfg = VERDICT_CONFIG[r.verdict];
+          const isOpen = expanded === r.scenario.id;
 
-      {/* 생성된 테스트 코드 */}
-      {result.test_code && (
-        <div className="rounded-xl border border-border overflow-hidden">
-          <button
-            onClick={() => setShowCode(!showCode)}
-            className="w-full flex items-center gap-2 px-4 py-3 bg-muted/30 hover:bg-muted/50 transition-colors"
-          >
-            <TestTube2 className="w-4 h-4 text-muted-foreground" />
-            <span className="text-xs font-medium flex-1 text-left">생성된 테스트 코드</span>
-            {showCode
-              ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-              : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
-            }
-          </button>
-          {showCode && (
-            <pre className="p-4 text-[11px] font-mono text-muted-foreground overflow-auto max-h-64 bg-muted/10">
-              {result.test_code}
-            </pre>
-          )}
-        </div>
-      )}
+          return (
+            <div
+              key={r.scenario.id}
+              className={cn("rounded-xl border overflow-hidden", cfg.border)}
+            >
+              {/* 헤더 — 클릭으로 펼치기 */}
+              <button
+                onClick={() => setExpanded(isOpen ? null : r.scenario.id)}
+                className="w-full flex items-center gap-3 p-3 hover:bg-white/5 transition-colors text-left"
+              >
+                {cfg.icon}
+                <span className="flex-1 text-xs font-medium leading-snug">
+                  {r.scenario.title}
+                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  {r.scenario.category && (
+                    <span className={cn(
+                      "text-[10px] px-2 py-0.5 rounded-full font-medium",
+                      CATEGORY_COLORS[r.scenario.category] ?? "bg-muted text-muted-foreground"
+                    )}>
+                      {r.scenario.category}
+                    </span>
+                  )}
+                  <span className={cn(
+                    "text-[10px] px-2 py-0.5 rounded-full border font-medium",
+                    cfg.badge
+                  )}>
+                    {cfg.label}
+                  </span>
+                  {isOpen
+                    ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                    : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+                  }
+                </div>
+              </button>
+
+              {/* 펼쳐진 상세 내용 */}
+              {isOpen && (
+                <div className="px-4 pb-4 space-y-3 border-t border-border/50">
+                  {/* Given / When / Then */}
+                  <div className="mt-3 space-y-2">
+                    {[
+                      { label: "전제 조건", value: r.scenario.given, color: "text-blue-400" },
+                      { label: "동작", value: r.scenario.when, color: "text-purple-400" },
+                      { label: "기대 결과", value: r.scenario.then, color: "text-emerald-400" },
+                    ].map(({ label, value, color }) => (
+                      <div key={label} className="flex gap-2">
+                        <span className={cn("text-[10px] font-semibold shrink-0 w-16 pt-0.5", color)}>
+                          {label}
+                        </span>
+                        <p className="text-xs text-muted-foreground leading-relaxed">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* AI 판단 근거 */}
+                  <div className="rounded-lg bg-muted/30 p-3">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <Info className="w-3 h-3 text-muted-foreground" />
+                      <span className="text-[10px] text-muted-foreground font-medium">
+                        AI 검증 근거
+                        {r.confidence > 0 && (
+                          <span className="ml-1 opacity-60">(확신도 {r.confidence}%)</span>
+                        )}
+                      </span>
+                    </div>
+                    <p className="text-xs text-foreground leading-relaxed">{r.reasoning}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
