@@ -267,7 +267,7 @@ export function ChatPanel() {
         </div>
         <p className="text-[9px] text-muted-foreground mt-1.5 text-center">
           <Sparkles className="w-2.5 h-2.5 inline mr-1" />
-          Claude AI 기반 · Enter로 전송
+          Enter로 전송
         </p>
       </div>
     </motion.aside>

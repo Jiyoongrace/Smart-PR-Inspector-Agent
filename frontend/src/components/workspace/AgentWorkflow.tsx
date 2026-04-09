@@ -21,6 +21,19 @@ import { useAppStore } from "@/store";
 import type { NodeStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+// 노드 ID → 탭 매핑 (클릭 시 해당 탭으로 이동)
+const NODE_TAB_MAP: Record<string, string> = {
+  fetch: "overview",
+  convention: "convention",
+  test_gen: "tests",
+  test_run: "tests",
+  impact: "impact",
+  domain_explain: "impact",
+  doc_sync: "docs",
+  comment: "overview",
+  slack: "overview",
+};
+
 const WORKFLOW_NODES = [
   {
     id: "fetch",
@@ -62,7 +75,7 @@ const WORKFLOW_NODES = [
     id: "impact",
     label: "영향도 분석",
     icon: GitFork,
-    description: "AST 정적 분석으로 의존성 추적",
+    description: "AST 정적 분석 + 비즈니스 임팩트",
     color: "from-orange-600 to-orange-700",
   },
   {
@@ -120,7 +133,7 @@ const STATUS_BG: Record<NodeStatus, string> = {
 };
 
 export function AgentWorkflow() {
-  const { currentAnalysis, isAnalyzing } = useAppStore();
+  const { currentAnalysis, isAnalyzing, setActiveTab } = useAppStore();
   const nodeStatus = currentAnalysis?.node_status;
 
   const getStatus = (nodeId: string): NodeStatus => {
@@ -151,6 +164,8 @@ export function AgentWorkflow() {
 
             const status = getStatus(node.id);
             const NodeIcon = (node as any).icon;
+            const targetTab = NODE_TAB_MAP[node.id];
+            const isClickable = status === "success" || status === "failed";
 
             return (
               <motion.div
@@ -161,10 +176,16 @@ export function AgentWorkflow() {
                 className="w-full"
               >
                 <div
+                  onClick={() => {
+                    if (isClickable && targetTab) {
+                      setActiveTab(targetTab as any);
+                    }
+                  }}
                   className={cn(
                     "flex items-center gap-3 rounded-xl border p-3 transition-all",
                     STATUS_BG[status],
-                    STATUS_RING[status]
+                    STATUS_RING[status],
+                    isClickable && "cursor-pointer hover:ring-1 hover:ring-primary/40 hover:bg-white/5"
                   )}
                 >
                   {/* 아이콘 */}
