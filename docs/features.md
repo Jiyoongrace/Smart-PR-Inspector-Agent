@@ -91,15 +91,43 @@
 
 ---
 
-## 6. Slack 연동 승인 워크플로우
+## 6. PR 승인 / 머지 워크플로우
 
-**What**: 시니어가 Slack에서 PR 승인/거부를 처리 가능
+**What**: 분석 완료 후 UI에서 바로 PR 승인 및 머지 처리 가능
+
+### 6-A. 웹 UI에서 직접 처리 (권장)
+
+분석 결과 **개요 탭** 하단 "PR 액션" 패널에서:
+
+| 버튼 | 동작 |
+|------|------|
+| **PR 승인** | GitHub에 Approve Review 제출 |
+| **PR 머지** | 선택한 방식으로 GitHub PR 머지 |
+| **GitHub에서 보기** | PR 페이지로 이동 |
+
+**머지 방식 선택**:
+- `Squash Merge` (기본) — 커밋을 1개로 합쳐서 머지
+- `Merge Commit` — 모든 커밋 이력 유지
+- `Rebase Merge` — 선형 이력 유지
+
+### 6-B. REST API 직접 호출
+
+```bash
+# PR 승인
+curl -X POST "http://localhost:8000/api/approve-pr?repo=owner/repo&pr_number=1234"
+
+# PR 머지 (squash)
+curl -X POST "http://localhost:8000/api/merge-pr?repo=owner/repo&pr_number=1234&merge_method=squash"
+```
+
+### 6-C. Slack 연동 (선택)
+
+**What**: Slack에서 PR 승인/거부를 처리 가능
 
 **How**:
 1. Agent가 PR 분석 완료 후 Slack 채널에 메시지 전송
 2. Slack Block Kit으로 "승인", "수정 요청", "상세 보기" 버튼 제공
 3. 버튼 클릭 시 Slack Webhook → GitHub API로 Review 제출
-4. 승인 시 자동 머지 (옵션)
 
 **Slack 메시지 예시**:
 ```
@@ -146,7 +174,29 @@ PR #1234: "재고 차감 로직 개선"
 
 ---
 
-## 9. 실시간 분석 대시보드 (신규)
+## 9. AI 기반 PR 자동 생성 (신규)
+
+**What**: 브랜치 간 커밋 내역을 Claude로 분석하여 PR 제목 + 본문을 자동 작성 후 GitHub PR 생성
+
+**How**:
+1. 사이드바 **"생성" 탭** 클릭
+2. 레포지토리 (`owner/repo`), Head 브랜치, Base 브랜치 입력
+3. Draft 여부 선택 후 "PR 생성" 버튼 클릭
+4. Claude가 커밋 목록 분석 → 제목/변경 사항/체크리스트 자동 작성
+5. GitHub PR 생성 완료 → PR 번호 + 링크 표시
+
+**폴백**: Claude API 호출 실패 시 커밋 메시지 기반으로 자동 생성
+
+**REST API**:
+```bash
+curl -X POST http://localhost:8000/api/create-pr \
+  -H "Content-Type: application/json" \
+  -d '{"repo":"owner/repo","head":"feature/my-feature","base":"main","draft":false}'
+```
+
+---
+
+## 10. 실시간 분석 대시보드 (신규)
 
 **What**: 웹 UI에서 Agent 실행 과정을 실시간으로 모니터링
 

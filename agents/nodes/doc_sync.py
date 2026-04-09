@@ -154,9 +154,7 @@ def _generate_update_draft(
 ) -> str:
     """LLM으로 Swagger 업데이트 초안 생성"""
     try:
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        from config.llm import call_llm
 
         changes_text = "\n".join([
             f"- {c['method']} {c['path']}: {c.get('function_sig', '')}"
@@ -173,13 +171,7 @@ def _generate_update_draft(
 
 간결하게 핵심만 작성하고, 실제 Swagger 경로 정의 형식으로 출력하세요."""
 
-        message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        draft = message.content[0].text.strip()
+        draft = call_llm(prompt, max_tokens=1024)
 
         header = "### 📄 Swagger/OpenAPI 업데이트 필요\n\n"
         header += "\n".join(f"- {u}" for u in updates)
