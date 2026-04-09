@@ -96,6 +96,15 @@ class TestResult(BaseModel):
     verification_mode: str = "ai_scenario"  # "ai_scenario" | "code"
 
 
+class BusinessImpact(BaseModel):
+    """비즈니스 관점 영향도 분석"""
+    summary: str = ""
+    affected_features: List[str] = Field(default_factory=list)
+    user_facing_changes: str = ""
+    risk_description: str = ""
+    recommendations: List[str] = Field(default_factory=list)
+
+
 class ImpactAnalysis(BaseModel):
     """코드 영향도 분석 결과"""
     changed_functions: List[str] = Field(default_factory=list)
@@ -103,6 +112,7 @@ class ImpactAnalysis(BaseModel):
     has_api_changes: bool = False
     call_chain: List[str] = Field(default_factory=list)
     risk_level: str = "low"  # low | medium | high | critical
+    business_impact: Optional[BusinessImpact] = None
 
 
 class ComplexityResult(BaseModel):

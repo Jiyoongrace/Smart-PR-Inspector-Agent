@@ -1,9 +1,10 @@
 """
 코드 영향도 분석 노드
-AST 기반 정적 분석으로 변경 함수의 의존성 추적
+AST 기반 정적 분석 + LLM 비즈니스 영향도 분석
 """
 
 import ast
+import json
 import logging
 import os
 import re
@@ -11,7 +12,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Set
 
-from agents.state import AgentState, ImpactAnalysis, NodeStatus
+from agents.state import AgentState, BusinessImpact, ImpactAnalysis, NodeStatus
 
 logger = logging.getLogger(__name__)
 
@@ -56,12 +57,22 @@ def impact_analysis_node(state: AgentState) -> AgentState:
         changed_files=list(changed_files),
     )
 
+    # 비즈니스 영향도 LLM 분석
+    business_impact = _analyze_business_impact(
+        pr_data=state.pr_data,
+        changed_functions=changed_functions,
+        affected_modules=affected_modules,
+        has_api_changes=has_api_changes,
+        risk_level=risk_level,
+    )
+
     state.impact_analysis = ImpactAnalysis(
         changed_functions=changed_functions,
         affected_modules=affected_modules,
         has_api_changes=has_api_changes,
         call_chain=call_chain,
         risk_level=risk_level,
+        business_impact=business_impact,
     )
 
     state.node_status.impact = NodeStatus.SUCCESS
@@ -225,3 +236,51 @@ def _assess_risk(
     elif score >= 4:
         return "medium"
     return "low"
+
+
+def _analyze_business_impact(
+    pr_data,
+    changed_functions: List[str],
+    affected_modules: List[dict],
+    has_api_changes: bool,
+    risk_level: str,
+) -> BusinessImpact | None:
+    """LLM을 활용한 비즈니스 관점 영향도 분석"""
+    try:
+        from config.llm import call_llm
+        from config.prompts import BUSINESS_IMPACT_PROMPT
+
+        # diff 크기 제한 (토큰 절약)
+        diff_snippet = pr_data.diff[:4000] if pr_data.diff else ""
+        module_names = [m.get("module", "") for m in affected_modules[:10]]
+
+        prompt = BUSINESS_IMPACT_PROMPT.substitute(
+            pr_title=pr_data.title,
+            changed_files=", ".join(pr_data.changed_files[:15]),
+            changed_functions=", ".join(changed_functions[:15]),
+            affected_modules=", ".join(module_names),
+            has_api_changes="예" if has_api_changes else "아니오",
+            risk_level=risk_level,
+            diff_snippet=diff_snippet,
+        )
+
+        raw = call_llm(prompt, max_tokens=1024)
+
+        # JSON 파싱 (마크다운 코드블록 제거)
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
+
+        data = json.loads(cleaned)
+
+        return BusinessImpact(
+            summary=data.get("summary", ""),
+            affected_features=data.get("affected_features", []),
+            user_facing_changes=data.get("user_facing_changes", ""),
+            risk_description=data.get("risk_description", ""),
+            recommendations=data.get("recommendations", []),
+        )
+
+    except Exception as e:
+        logger.warning(f"비즈니스 영향도 분석 실패 (스킵): {e}")
+        return None

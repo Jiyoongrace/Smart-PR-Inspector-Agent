@@ -64,6 +64,14 @@ export interface TestResult {
   verification_mode: "ai_scenario" | "code";
 }
 
+export interface BusinessImpact {
+  summary: string;
+  affected_features: string[];
+  user_facing_changes: string;
+  risk_description: string;
+  recommendations: string[];
+}
+
 export interface ImpactAnalysis {
   changed_functions: string[];
   affected_modules: Array<{
@@ -75,6 +83,7 @@ export interface ImpactAnalysis {
   has_api_changes: boolean;
   call_chain: string[];
   risk_level: RiskLevel;
+  business_impact?: BusinessImpact;
 }
 
 export interface PRData {
