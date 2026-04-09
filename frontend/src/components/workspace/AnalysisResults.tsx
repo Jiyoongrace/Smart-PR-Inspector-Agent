@@ -26,7 +26,7 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { useAppStore } from "@/store";
 import { cn, getRiskColor, getRiskLabel, formatDuration } from "@/lib/utils";
-import type { ConventionViolation, ScenarioResult } from "@/lib/types";
+import type { ConventionViolation, ScenarioResult, BusinessImpact } from "@/lib/types";
 
 const SEVERITY_CONFIG = {
   error: {
@@ -199,19 +199,33 @@ function OverviewTab() {
 
       {/* 도메인 설명 */}
       {currentAnalysis?.domain_explanation && (
-        <div className="rounded-xl border border-border bg-card p-4">
+        <div className={cn(
+          "rounded-xl border p-4",
+          currentAnalysis.domain_sources.length > 0
+            ? "border-violet-400/20 bg-violet-400/5"
+            : "border-border bg-card"
+        )}>
           <div className="flex items-center gap-2 mb-3">
             <BookOpen className="w-4 h-4 text-pink-400" />
             <h4 className="text-xs font-semibold">비즈니스 영향도</h4>
+            {currentAnalysis.domain_sources.length > 0 ? (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 border border-violet-500/20 ml-auto font-medium">
+                RAG 문서 기반
+              </span>
+            ) : (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border ml-auto">
+                코드 추론
+              </span>
+            )}
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
             {currentAnalysis.domain_explanation}
           </p>
           {currentAnalysis.domain_sources.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-border">
-              <p className="text-[10px] text-muted-foreground mb-1.5">참고 문서:</p>
+            <div className="mt-3 pt-3 border-t border-violet-400/10">
+              <p className="text-[10px] text-muted-foreground mb-1.5">참조된 도메인 문서:</p>
               {currentAnalysis.domain_sources.map((src, i) => (
-                <p key={i} className="text-[10px] text-primary">📎 {src}</p>
+                <p key={i} className="text-[10px] text-violet-400">📎 {src}</p>
               ))}
             </div>
           )}
@@ -471,27 +485,67 @@ function TestsTab() {
     return <ScenarioView result={result} />;
   }
 
-  // 시나리오 없이 통계만 있는 경우 (스킵/오류)
+  // 시나리오 없이 통계만 있는 경우 (스킵/오류/완료)
+  const hasStats = result.total_tests > 0;
+  const statusIcon = result.passed
+    ? <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+    : hasStats
+      ? <XCircle className="w-5 h-5 text-red-400" />
+      : <Info className="w-5 h-5 text-amber-400" />;
+
+  const statusBg = result.passed
+    ? "bg-emerald-500/10 border-emerald-500/20"
+    : hasStats
+      ? "bg-red-500/10 border-red-500/20"
+      : "bg-amber-500/10 border-amber-500/20";
+
+  const statusMsg = result.total_tests === 0
+    ? "검증할 시나리오가 없습니다 (변경사항이 충분하지 않음)"
+    : result.passed
+      ? `전체 ${result.total_tests}건 중 ${result.passed_tests}건 통과`
+      : `전체 ${result.total_tests}건 중 ${result.failed_tests}건 실패`;
+
   return (
     <div className="space-y-4">
-      <div className={cn(
-        "p-4 rounded-xl border",
-        result.passed
-          ? "bg-emerald-500/10 border-emerald-500/20"
-          : "bg-amber-500/10 border-amber-500/20"
-      )}>
+      <div className={cn("p-4 rounded-xl border", statusBg)}>
         <div className="flex items-center gap-3">
-          {result.passed
-            ? <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-            : <Info className="w-5 h-5 text-amber-400" />
-          }
-          <p className="text-sm font-medium text-muted-foreground">
-            {result.total_tests === 0
-              ? "검증할 시나리오가 없습니다 (변경사항이 충분하지 않음)"
-              : "검증 결과를 불러오는 중입니다..."}
-          </p>
+          {statusIcon}
+          <div>
+            <p className="text-sm font-medium">{statusMsg}</p>
+            {result.duration_seconds > 0 && (
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                검증 시간: {formatDuration(result.duration_seconds)}
+              </p>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* 코드 기반 테스트 결과 (stdout/stderr) */}
+      {result.verification_mode === "code" && result.test_code && (
+        <div className="rounded-xl border border-border p-4">
+          <h4 className="text-xs font-semibold mb-3">테스트 코드</h4>
+          <pre className="text-[11px] bg-muted/50 rounded-lg p-3 overflow-x-auto font-mono leading-relaxed">
+            {result.test_code}
+          </pre>
+        </div>
+      )}
+      {result.stdout && (
+        <div className="rounded-xl border border-border p-4">
+          <h4 className="text-xs font-semibold mb-3">실행 로그</h4>
+          <pre className="text-[11px] bg-muted/50 rounded-lg p-3 overflow-x-auto font-mono text-emerald-400 leading-relaxed max-h-48 overflow-y-auto">
+            {result.stdout}
+          </pre>
+        </div>
+      )}
+      {result.stderr && (
+        <div className="rounded-xl border border-red-500/20 p-4">
+          <h4 className="text-xs font-semibold mb-3 text-red-400">오류 로그</h4>
+          <pre className="text-[11px] bg-red-500/5 rounded-lg p-3 overflow-x-auto font-mono text-red-400 leading-relaxed max-h-48 overflow-y-auto">
+            {result.stderr}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }
@@ -737,8 +791,77 @@ function ImpactTab() {
           <div>
             <p className="text-xs font-medium text-amber-400">API 엔드포인트 변경 감지</p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Swagger/OpenAPI 문서 업데이트가 필요합니다. "문서" 탭을 확인하세요.
+              Swagger/OpenAPI 문서 업데이트가 필요합니다. &quot;문서&quot; 탭을 확인하세요.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* 비즈니스 영향도 분석 */}
+      {impact.business_impact && <BusinessImpactSection impact={impact.business_impact} />}
+    </div>
+  );
+}
+
+function BusinessImpactSection({ impact }: { impact: BusinessImpact }) {
+  return (
+    <div className="space-y-3">
+      {/* 비즈니스 요약 */}
+      <div className="rounded-xl border border-pink-400/20 bg-pink-400/5 p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <BookOpen className="w-4 h-4 text-pink-400" />
+          <h4 className="text-xs font-semibold text-pink-400">비즈니스 영향도 분석</h4>
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-400 border border-pink-500/20 ml-auto">
+            시니어 관점
+          </span>
+        </div>
+        <p className="text-sm font-medium mb-3">{impact.summary}</p>
+
+        {/* 사용자 체감 변화 */}
+        {impact.user_facing_changes && (
+          <div className="mb-3">
+            <p className="text-[10px] text-muted-foreground font-semibold mb-1 uppercase tracking-wide">사용자 체감 변화</p>
+            <p className="text-xs text-muted-foreground leading-relaxed">{impact.user_facing_changes}</p>
+          </div>
+        )}
+
+        {/* 비즈니스 리스크 */}
+        {impact.risk_description && (
+          <div className="mb-3">
+            <p className="text-[10px] text-muted-foreground font-semibold mb-1 uppercase tracking-wide">비즈니스 리스크</p>
+            <p className="text-xs text-muted-foreground leading-relaxed">{impact.risk_description}</p>
+          </div>
+        )}
+      </div>
+
+      {/* 영향받는 기능 */}
+      {impact.affected_features.length > 0 && (
+        <div className="rounded-xl border border-border p-4">
+          <h4 className="text-xs font-semibold mb-3">영향받는 비즈니스 기능</h4>
+          <div className="flex flex-wrap gap-2">
+            {impact.affected_features.map((feature, i) => (
+              <span
+                key={i}
+                className="text-[11px] px-2.5 py-1 rounded-lg bg-pink-500/10 text-pink-400 border border-pink-500/20"
+              >
+                {feature}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 시니어 권장 사항 */}
+      {impact.recommendations.length > 0 && (
+        <div className="rounded-xl border border-blue-400/20 bg-blue-400/5 p-4">
+          <h4 className="text-xs font-semibold mb-3 text-blue-400">배포 전 체크리스트</h4>
+          <div className="space-y-2">
+            {impact.recommendations.map((rec, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className="text-[10px] text-blue-400 font-bold shrink-0 mt-0.5">{i + 1}.</span>
+                <p className="text-xs text-muted-foreground leading-relaxed">{rec}</p>
+              </div>
+            ))}
           </div>
         </div>
       )}
