@@ -1,0 +1,297 @@
+# Agent 워크플로우 아키텍처
+
+> 다이어그램 원본: [agent-workflow.svg](./agent-workflow.svg)
+
+---
+
+## 전체 흐름 개요
+
+Smart PR Inspector Agent는 **LangGraph StateGraph** 기반의 순차 + 조건부 분기 패턴으로 동작합니다.  
+GitHub PR이 생성되거나 업데이트되면 자동으로 트리거되어, 코드 품질 분석부터 Slack 알림까지 9개 노드를 순서대로 실행합니다.
+
+```
+GitHub PR 이벤트
+  → FastAPI Webhook (:8000)
+    → [LangGraph StateGraph]
+        fetch → convention → test_gen → test_run
+                                          ├─ retry → fix_test ─┐ (최대 3회)
+                                          └────────────────────←┘
+                                          ↓ (success / fail 모두)
+                              impact → domain_explain → doc_sync
+                                → comment → slack → END
+```
+
+---
+
+## 실행 계층 구조
+
+### 1. 트리거 레이어
+
+| 구성 요소 | 설명 |
+|-----------|------|
+| **GitHub Webhook** | PR `created` / `synchronized` 이벤트 수신 |
+| **FastAPI Webhook Server** | `:8000`에서 Webhook 검증 후 LangGraph 실행 |
+
+Webhook 서명(HMAC-SHA256)을 검증한 뒤 `AgentState`를 초기화하고 워크플로우를 시작합니다.
+
+---
+
+### 2. AgentState — 공유 상태 객체
+
+모든 노드는 하나의 `AgentState`를 읽고 **새로운 state를 반환**합니다 (불변성 유지).
+
+```python
+class AgentState(BaseModel):
+    pr_data: PRData               # PR 번호, 레포, 작성자, 제목
+    diff: str                     # GitHub diff 원문
+    convention_result: dict       # 컨벤션 위반 목록
+    test_result: dict             # 테스트 실행 결과
+    impact: dict                  # 영향받는 모듈 목록
+    domain_explanation: str       # 비즈니스 영향도 요약
+    doc_updates: dict             # Swagger/README 변경 초안
+    slack_thread: str             # Slack 메시지 ID
+    node_status: NodeStatus       # 각 노드 실행 상태
+    retry_count: int              # fix_test 재시도 횟수
+    started_at: str
+    completed_at: str
+```
+
+---
+
+## 노드별 상세 설명
+
+### NODE 1 — `fetch`
+
+| 항목 | 내용 |
+|------|------|
+| **함수** | `fetch_pr_data_node` |
+| **역할** | GitHub PR 데이터를 수집하여 AgentState를 초기화 |
+| **입력** | `pr_number`, `repo` (owner/repo) |
+| **출력** | `pr_data`, `diff`, 변경 파일 목록 |
+| **도구** | PyGithub, GitHub REST API, unidiff |
+
+GitHub API를 통해 PR의 diff, 메타데이터(제목, 작성자, 브랜치), 변경된 파일 목록을 수집합니다.  
+수집된 diff는 `unidiff`로 파싱하여 추가/수정/삭제된 라인을 구조화합니다.
+
+---
+
+### NODE 2 — `convention`
+
+| 항목 | 내용 |
+|------|------|
+| **함수** | `convention_check_node` |
+| **역할** | 코드 컨벤션 위반 자동 탐지 |
+| **입력** | `diff` |
+| **출력** | `convention_result` (위반 목록, 라인 번호, 제안 코드) |
+| **도구** | `ast`, `pylint`, `radon`, `bandit`, Anthropic Claude |
+
+**동작 방식:**
+1. 변경된 코드를 `ast.parse()`로 AST 생성
+2. `config/conventions.yaml` 룰북과 패턴 매칭 (snake_case, 타입 힌트, 매직넘버 등)
+3. `radon`으로 순환 복잡도(Cyclomatic Complexity) 측정
+4. `bandit`으로 보안 취약점 스캔
+5. 복잡한 규칙(가독성, 로직 중복)은 Claude에게 위임
+
+> **주의:** 아키텍처 문서에는 `test_gen`과 병렬 실행으로 표기되어 있으나,  
+> 실제 구현에서는 **순차 실행**입니다 (동일 state key 동시 업데이트 오류 방지).
+
+---
+
+### NODE 3 — `test_gen`
+
+| 항목 | 내용 |
+|------|------|
+| **함수** | `test_generator_node` |
+| **역할** | 변경 함수에 대한 pytest 테스트 코드 자동 생성 |
+| **입력** | `diff`, `pr_data` |
+| **출력** | `test_result.generated_code` |
+| **도구** | Anthropic Claude, Jinja2 템플릿 |
+
+**동작 방식:**
+1. diff에서 변경된 함수의 시그니처와 docstring 추출
+2. Claude에게 `"이 함수를 검증하는 pytest 코드 작성"` 프롬프트 전달
+3. Jinja2 템플릿으로 테스트 파일 구성
+4. 임시 파일로 저장하여 다음 노드(`test_run`)에 전달
+
+---
+
+### NODE 4 — `test_run` (조건부 분기)
+
+| 항목 | 내용 |
+|------|------|
+| **함수** | `test_runner_node` |
+| **역할** | Docker 격리 환경에서 생성된 테스트 실행 |
+| **입력** | `test_result.generated_code` |
+| **출력** | `test_result` (pass/fail, 로그, 커버리지) |
+| **도구** | Docker Python SDK, pytest, pytest-timeout |
+| **분기 함수** | `should_retry(state)` |
+
+**라우팅 로직:**
+
+```python
+def should_retry(state: AgentState) -> str:
+    if state.retry_count < 3 and state.test_result.has_error:
+        return "retry"   # → fix_test 노드로
+    elif state.test_result.passed:
+        return "success" # → impact 노드로
+    else:
+        return "fail"    # → impact 노드로 (분석은 계속)
+```
+
+| 결과 | 다음 노드 | 설명 |
+|------|-----------|------|
+| `retry` | `fix_test` | 에러 로그를 LLM에 전달하여 코드 수정 |
+| `success` | `impact` | 테스트 통과, 정상 분석 계속 |
+| `fail` | `impact` | **테스트 실패해도 나머지 분석은 계속 수행** |
+
+> `fail`도 `impact`로 이어진다는 점이 핵심입니다.  
+> 테스트가 실패하더라도 영향도 분석, 문서 동기화, Slack 알림은 모두 실행됩니다.
+
+---
+
+### RETRY NODE — `fix_test`
+
+| 항목 | 내용 |
+|------|------|
+| **함수** | `fix_test_code_node` |
+| **역할** | 테스트 실패 로그를 LLM에 전달하여 코드 수정 후 재시도 |
+| **입력** | `test_result.error_log`, `test_result.generated_code` |
+| **출력** | `test_result.generated_code` (수정본), `retry_count + 1` |
+| **도구** | Anthropic Claude |
+
+`fix_test → test_run` 루프는 **최대 3회** 반복됩니다.  
+3회 초과 시 `should_retry`가 `"fail"`을 반환하여 루프를 종료하고 `impact`로 진행합니다.
+
+---
+
+### NODE 5 — `impact`
+
+| 항목 | 내용 |
+|------|------|
+| **함수** | `impact_analysis_node` |
+| **역할** | 변경된 함수가 어떤 모듈/함수에서 호출되는지 정적 분석 |
+| **입력** | `diff` |
+| **출력** | `impact` (영향 모듈 리스트, 호출 체인, API 변경 여부) |
+| **도구** | `ast`, 내장 DFS/BFS |
+
+**동작 방식:**
+1. `ast` 모듈로 전체 프로젝트를 파싱하여 호출 그래프 생성
+2. 변경된 함수를 시작점으로 DFS/BFS 탐색
+3. 영향받는 파일·함수 목록과 호출 체인 반환
+4. `@app.post()` 등 API 데코레이터 감지 → Swagger 업데이트 필요 여부 플래그
+
+---
+
+### NODE 6 — `domain_explain` (RAG)
+
+| 항목 | 내용 |
+|------|------|
+| **함수** | `domain_explainer_node` |
+| **역할** | 내부 도메인 문서를 검색해 비즈니스 영향도 설명 |
+| **입력** | `diff`, `impact` |
+| **출력** | `domain_explanation` (300자 이내 비즈니스 요약) |
+| **도구** | ChromaDB (벡터 DB), Anthropic Claude, LangChain RAG |
+
+**RAG 파이프라인:**
+1. Notion/Confluence 문서를 ChromaDB에 임베딩하여 사전 저장
+2. 변경 함수명 + 주변 코드를 쿼리로 유사 문서 검색
+3. 검색 결과 + diff를 Claude에게 전달
+4. "이 변경이 비즈니스적으로 어떤 의미인지" 300자 요약 생성
+
+---
+
+### NODE 7 — `doc_sync`
+
+| 항목 | 내용 |
+|------|------|
+| **함수** | `doc_sync_check_node` |
+| **역할** | API 스펙 변경 감지 및 Swagger/README 업데이트 초안 생성 |
+| **입력** | `diff`, `impact` |
+| **출력** | `doc_updates` (변경 초안, 업데이트 필요 여부) |
+| **도구** | `ast`, `prance` (Swagger 검증), Jinja2 |
+
+**동작 방식:**
+1. `ast` 파서로 FastAPI 데코레이터 + 함수 시그니처 추출
+2. 기존 `swagger.yaml` / `openapi.json` 파싱 후 diff 비교
+3. 추가/변경/삭제된 필드 탐지
+4. Jinja2 템플릿으로 업데이트 초안 생성 → PR 코멘트에 첨부
+
+---
+
+### NODE 8 — `comment`
+
+| 항목 | 내용 |
+|------|------|
+| **함수** | `generate_comment_node` |
+| **역할** | 모든 분석 결과를 통합하여 GitHub PR 코멘트 작성 |
+| **입력** | `convention_result`, `test_result`, `impact`, `domain_explanation`, `doc_updates` |
+| **출력** | GitHub PR에 Markdown 코멘트 게시 |
+| **도구** | PyGithub, Anthropic Claude |
+
+컨벤션 위반 목록, 테스트 결과, 영향도 분석, 비즈니스 설명, Swagger 변경 제안을  
+하나의 Markdown 리포트로 통합하여 GitHub PR에 코멘트로 게시합니다.
+
+---
+
+### NODE 9 — `slack`
+
+| 항목 | 내용 |
+|------|------|
+| **함수** | `slack_notify_node` |
+| **역할** | 분석 요약과 인터랙티브 버튼을 Slack 채널에 전송 |
+| **입력** | `convention_result`, `test_result`, `doc_updates` |
+| **출력** | `slack_thread` (메시지 ID) |
+| **도구** | Slack SDK, Slack Bolt |
+
+Block Kit으로 구성된 메시지에 **승인 / 수정 요청 / 상세 보기** 버튼을 포함합니다.  
+Slack에서 직접 PR 리뷰 액션을 처리할 수 있습니다.
+
+---
+
+## 실시간 스트리밍
+
+각 노드 완료 시 **SSE(Server-Sent Events)** 로 프론트엔드에 이벤트를 전송합니다.
+
+```
+type: "start"        → 워크플로우 시작
+type: "node_complete" → 노드 완료 (node 이름 + AgentState 포함)
+type: "complete"     → 전체 완료 (최종 state 포함, SQLite DB 저장)
+type: "error"        → 오류 발생
+```
+
+Next.js 프론트엔드는 `EventSource`로 이를 구독하여 노드 진행 상태를 실시간으로 시각화합니다.
+
+---
+
+## 인프라 구성
+
+| 구성 요소 | 기술 | 용도 |
+|-----------|------|------|
+| API 서버 | FastAPI | Webhook 수신, SSE 스트리밍, REST API |
+| LLM | Claude claude-sonnet-4-6 | 코드 분석, 테스트 생성, 도메인 설명 |
+| Vector DB | ChromaDB (로컬) / Pinecone (클라우드) | RAG 도메인 문서 검색 |
+| Cache | Redis 7.x | AgentState 세션 캐싱 |
+| Test Isolation | Docker Python SDK | pytest 격리 실행 |
+| DB | SQLite | 분석 이력 영속화 |
+| 프론트엔드 | Next.js 14 + Zustand + TanStack Query | 실시간 대시보드 |
+
+---
+
+## 관련 파일
+
+| 파일 | 역할 |
+|------|------|
+| `agents/orchestrator.py` | StateGraph 생성 및 엣지 연결 |
+| `agents/state.py` | AgentState Pydantic 모델 정의 |
+| `agents/nodes/fetcher.py` | fetch 노드 |
+| `agents/nodes/convention.py` | convention 노드 |
+| `agents/nodes/test_gen.py` | test_gen 노드 |
+| `agents/nodes/test_runner.py` | test_run / fix_test 노드 + should_retry |
+| `agents/nodes/impact.py` | impact 노드 |
+| `agents/nodes/domain_explainer.py` | domain_explain 노드 |
+| `agents/nodes/doc_sync.py` | doc_sync 노드 |
+| `agents/nodes/commenter.py` | comment 노드 |
+| `agents/nodes/slack_notify.py` | slack 노드 |
+| `api/webhook.py` | FastAPI 진입점, SSE 스트리밍 |
+| `config/prompts.py` | LLM 프롬프트 중앙 관리 |
+| `config/conventions.yaml` | 컨벤션 룰북 |
