@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from agents.orchestrator import run_pr_analysis, run_pr_analysis_stream
 from agents.state import AgentState
+from config.github_app import get_github_client
 from db.history import get_analysis_by_id, get_analysis_by_pr, list_analyses
 from memory.cache import get_cache, set_cache
 
@@ -289,8 +290,7 @@ async def slack_interactions(request: Request):
 
 def _github_approve(repo: str, pr_number: int) -> None:
     """GitHub PR Approve Review 제출"""
-    from github import Github
-    gh = Github(os.getenv("GITHUB_TOKEN"))
+    gh = get_github_client()
     github_repo = gh.get_repo(repo)
     pr = github_repo.get_pull(pr_number)
     pr.create_review(
@@ -301,8 +301,7 @@ def _github_approve(repo: str, pr_number: int) -> None:
 
 def _github_request_changes(repo: str, pr_number: int) -> None:
     """GitHub PR REQUEST_CHANGES Review 제출"""
-    from github import Github
-    gh = Github(os.getenv("GITHUB_TOKEN"))
+    gh = get_github_client()
     github_repo = gh.get_repo(repo)
     pr = github_repo.get_pull(pr_number)
     pr.create_review(
@@ -404,9 +403,9 @@ async def _generate_pr_content(
 async def create_pull_request(req: CreatePRRequest):
     """커밋 목록을 Claude로 요약하여 GitHub PR 자동 생성"""
     try:
-        from github import Github, GithubException
+        from github import GithubException
 
-        gh = Github(os.getenv("GITHUB_TOKEN"))
+        gh = get_github_client()
         try:
             github_repo = gh.get_repo(req.repo)
         except GithubException as e:
@@ -475,8 +474,7 @@ async def create_pull_request(req: CreatePRRequest):
 async def approve_pull_request(repo: str, pr_number: int, comment: str = ""):
     """GitHub PR 승인 (Approve Review 제출)"""
     try:
-        from github import Github, GithubException
-        gh = Github(os.getenv("GITHUB_TOKEN"))
+        gh = get_github_client()
         github_repo = gh.get_repo(repo)
         pr = github_repo.get_pull(pr_number)
         body = comment or "✅ Smart PR Inspector를 통해 승인되었습니다."
@@ -504,8 +502,8 @@ async def merge_pull_request(
 ):
     """GitHub PR 머지"""
     try:
-        from github import Github, GithubException
-        gh = Github(os.getenv("GITHUB_TOKEN"))
+        from github import GithubException
+        gh = get_github_client()
         github_repo = gh.get_repo(repo)
         pr = github_repo.get_pull(pr_number)
 

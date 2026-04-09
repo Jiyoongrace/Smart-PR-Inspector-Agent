@@ -4,11 +4,9 @@ GitHub PR 코멘트 생성 노드
 """
 
 import logging
-import os
-
-from github import Github
 
 from agents.state import AgentState, NodeStatus
+from config.github_app import get_github_client
 
 logger = logging.getLogger(__name__)
 
@@ -262,11 +260,7 @@ def _build_personalized_section(state: AgentState) -> str:
 
 def _post_github_comment(repo: str, pr_number: int, body: str) -> int:
     """GitHub API로 PR 코멘트 게시"""
-    token = os.getenv("GITHUB_TOKEN")
-    if not token:
-        raise ValueError("GITHUB_TOKEN 환경변수가 설정되지 않음")
-
-    gh = Github(token)
+    gh = get_github_client()
     github_repo = gh.get_repo(repo)
     pr = github_repo.get_pull(pr_number)
     comment = pr.create_issue_comment(body)
