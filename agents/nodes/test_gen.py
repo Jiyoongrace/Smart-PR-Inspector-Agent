@@ -49,8 +49,8 @@ def test_generator_node(state: AgentState) -> AgentState:
             # ScenarioResult 없이 TestScenario만 임시 저장 (직렬화용)
             # test_runner에서 ScenarioResult로 채워짐
         )
-        # 시나리오를 state에 임시 보관 (test_runner에서 사용)
-        state._pending_scenarios = scenarios  # type: ignore[attr-defined]
+        # 시나리오를 state에 보관 (test_runner에서 사용)
+        state.pending_scenarios = scenarios
 
         state.node_status.test_gen = NodeStatus.SUCCESS
         logger.info(f"시나리오 {len(scenarios)}개 생성 완료")

@@ -1,6 +1,15 @@
 """
 LangGraph 기반 메인 오케스트레이터
 PR 분석 워크플로우 전체를 조율하는 StateGraph
+
+SKILL.md에서 스킬 정의를 로드하여 워크플로우를 구성합니다.
+
+고도화 사항:
+- SKILL.md: 선언적 스킬 정의 기반 워크플로우 구성
+- 병렬 처리: convention + test_gen을 동시 실행 (Fork/Join)
+- HITL: 아키텍처 룰 위반 시 시니어 승인 대기
+- 재시도: 테스트 실패 시 최대 3회 자동 수정 재시도
+- Hybrid RAG: domain_explain 노드에서 Dense+Sparse+Re-ranking 적용
 """
 
 import asyncio
@@ -13,6 +22,8 @@ from db.history import save_analysis
 from langgraph.graph import END, StateGraph
 
 from agents.nodes import (
+    arch_review_node,
+    check_arch_approval,
     convention_check_node,
     doc_sync_check_node,
     domain_explainer_node,
@@ -26,20 +37,51 @@ from agents.nodes import (
     test_runner_node,
 )
 from agents.state import AgentState, NodeStatus, PRData
+from config.skills import get_skill_registry
 
 logger = logging.getLogger(__name__)
 
 
 def create_workflow():
-    """LangGraph StateGraph 워크플로우 생성 및 컴파일"""
+    """
+    LangGraph StateGraph 워크플로우 생성 및 컴파일
+
+    SKILL.md에서 스킬 정의를 로드하여 워크플로우 메타데이터로 활용합니다.
+    스킬 레지스트리를 통해 각 노드의 모델, 프롬프트, RAG 설정 등을 조회할 수 있습니다.
+
+    워크플로우 구조:
+    fetch → FORK → [convention, test_gen] → JOIN
+         → arch_review → (HITL 분기)
+         → test_run → (재시도 분기) → impact
+         → domain_explain (Hybrid RAG) → doc_sync
+         → comment → slack → END
+    """
+    # SKILL.md 로드 — 스킬 메타데이터 참조용
+    registry = get_skill_registry()
+    logger.info(
+        f"SKILL.md 기반 워크플로우 구성: "
+        f"{len(registry.skills)}개 스킬 로드, "
+        f"병렬 그룹: {registry.get_parallel_skills()}, "
+        f"HITL 스킬: {[s.id for s in registry.get_hitl_skills()]}"
+    )
+
     workflow = StateGraph(AgentState)
 
     # ── 노드 등록 ──────────────────────────────────────────────
     workflow.add_node("fetch", fetch_pr_data_node)
+
+    # 병렬 실행 노드 (Fork/Join)
     workflow.add_node("convention", convention_check_node)
     workflow.add_node("test_gen", test_generator_node)
+
+    # HITL: 아키텍처 룰 점검 + 승인 대기
+    workflow.add_node("arch_review", arch_review_node)
+
+    # 테스트 실행 + 재시도
     workflow.add_node("test_run", test_runner_node)
     workflow.add_node("fix_test", fix_test_code_node)
+
+    # 후속 분석
     workflow.add_node("impact", impact_analysis_node)
     workflow.add_node("domain_explain", domain_explainer_node)
     workflow.add_node("doc_sync", doc_sync_check_node)
@@ -47,29 +89,44 @@ def create_workflow():
     workflow.add_node("slack", slack_notify_node)
 
     # ── 엣지 연결 ──────────────────────────────────────────────
-    # 순차 실행: 병렬 실행 시 동일 state key 동시 업데이트 오류 방지
+
+    # 1. 시작점
     workflow.set_entry_point("fetch")
 
-    # fetch → convention → test_gen (순차)
+    # 2. fetch → convention → test_gen → arch_review (순차 실행)
+    #    NOTE: Pydantic BaseModel 기반 State는 동시 업데이트 불가
+    #    병렬 실행을 위해서는 TypedDict + Annotated 리듀서 전환 필요
+    #    SKILL.md에 parallel_group: analysis_fork로 선언되어 향후 전환 대비
     workflow.add_edge("fetch", "convention")
     workflow.add_edge("convention", "test_gen")
 
-    # test_gen → test_run
-    workflow.add_edge("test_gen", "test_run")
+    # 3. test_gen → arch_review (HITL 점검)
+    workflow.add_edge("test_gen", "arch_review")
 
-    # test_run → 재시도 / 성공 / 실패 분기
+    # 4. 아키텍처 룰 점검 결과에 따른 분기 (HITL)
+    workflow.add_conditional_edges(
+        "arch_review",
+        check_arch_approval,
+        {
+            "approved": "test_run",   # 위반 없음 or 승인 → 테스트 진행
+            "rejected": "comment",    # 반려 → PR 반려 코멘트 작성
+        },
+    )
+
+    # 5. test_run → 재시도 / 성공 / 실패 분기
     workflow.add_conditional_edges(
         "test_run",
         should_retry,
         {
-            "retry": "fix_test",
-            "success": "impact",
-            "fail": "impact",  # 테스트 실패해도 나머지 분석 수행
+            "retry": "fix_test",      # 실패 + 재시도 가능 → 코드 수정
+            "success": "impact",      # 성공 → 영향도 분석
+            "fail": "impact",         # 실패 (3회 초과) → 분석 계속
         },
     )
-    workflow.add_edge("fix_test", "test_run")
+    workflow.add_edge("fix_test", "test_run")  # 재시도 루프
 
-    # impact → domain_explain → doc_sync → comment → slack → END
+    # 6. 후속 분석 체인
+    #    impact → domain_explain (Hybrid RAG) → doc_sync → comment → slack → END
     workflow.add_edge("impact", "domain_explain")
     workflow.add_edge("domain_explain", "doc_sync")
     workflow.add_edge("doc_sync", "comment")
@@ -179,11 +236,27 @@ async def run_pr_analysis_stream(
 
                 if state:
                     final_state = state
+
+                    # HITL 대기 상태인 경우 특별 이벤트 발행
+                    event_type = "node_complete"
+                    extra = {}
+                    if (
+                        node_name == "arch_review"
+                        and state.arch_review
+                        and state.arch_review.has_violation
+                    ):
+                        event_type = "hitl_pending"
+                        extra = {
+                            "violations": state.arch_review.violations,
+                            "approval_status": state.arch_review.approval_status,
+                        }
+
                     yield {
-                        "type": "node_complete",
+                        "type": event_type,
                         "node": node_name,
                         "status": state.node_status.model_dump(),
                         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+                        **extra,
                     }
 
         final_state.completed_at = datetime.now(tz=timezone.utc).isoformat()
