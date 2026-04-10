@@ -142,23 +142,25 @@ def _generate_explanation(
     from config.llm import call_llm
 
     domain_context = ""
+    rag_note = ""
     if domain_docs:
-        domain_context = "\n\n관련 도메인 문서:\n" + "\n---\n".join(domain_docs[:5])
+        domain_context = "\n\n=== 팀 도메인 문서 (RAG 검색 결과) ===\n" + "\n---\n".join(domain_docs[:5])
+        rag_note = "\n\n반드시 위 '팀 도메인 문서'의 내용을 참고하여 비즈니스 영향도를 분석하세요. 문서에 나온 용어, 정책, 비즈니스 룰을 인용해서 설명하세요."
 
-    prompt = f"""다음 코드 변경이 비즈니스적으로 어떤 의미인지 200자 이내로 한국어로 설명하세요.
+    prompt = f"""다음 코드 변경이 비즈니스적으로 어떤 의미인지 한국어로 설명하세요.
 기술적 설명보다 비즈니스/사용자 관점에서 설명하고, 주의사항이 있다면 언급하세요.
-관련 정보가 없으면 코드만 보고 추론하세요.
+{domain_context}
+{rag_note}
 
 PR 제목: {pr_title}
 
 코드 변경:
 {diff_snippet[:1500]}
-{domain_context}
 
 응답 형식:
 - 첫 문장: 이 변경이 무엇을 하는지
-- 둘째 문장: 사용자/비즈니스에 미치는 영향
-- (있다면) 주의사항"""
+- 둘째 문장: 사용자/비즈니스에 미치는 영향 (도메인 문서 기반)
+- (있다면) 도메인 문서에 근거한 주의사항"""
 
     return call_llm(prompt, max_tokens=512)
 

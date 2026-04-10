@@ -137,7 +137,7 @@ export function ChatPanel() {
                 <Loader2 className="w-2.5 h-2.5 animate-spin" /> 분석 실행 중...
               </span>
             ) : (
-              "Claude AI 기반 대화"
+              "AI 기반 대화"
             )}
           </p>
         </div>

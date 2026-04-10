@@ -134,13 +134,66 @@ async def rag_stats():
     return {
         "domain_docs": domain_store.count(),
         "convention_docs": convention_store.count(),
-        "hybrid_rag": {
-            "dense": "ChromaDB (DefaultEmbeddingFunction)",
-            "sparse": "BM25Okapi (rank-bm25)",
-            "reranker": "cross-encoder/ms-marco-MiniLM-L-6-v2",
-            "fusion": "Reciprocal Rank Fusion (k=60)",
-        },
+        "domain_files": _get_indexed_files(domain_store),
+        "convention_files": _get_indexed_files(convention_store),
     }
+
+
+@router.delete("/documents/{collection}/{filename}")
+async def delete_document(collection: str, filename: str):
+    """인덱싱된 문서 삭제"""
+    if collection == "convention":
+        store = get_convention_store()
+    elif collection == "domain":
+        store = get_vector_store()
+    else:
+        raise HTTPException(status_code=400, detail="컬렉션: convention 또는 domain")
+
+    try:
+        coll = store._get_collection()
+        # 해당 파일의 모든 청크 조회
+        results = coll.get(where={"source": {"$eq": filename}})
+        if results and results["ids"]:
+            coll.delete(ids=results["ids"])
+            # BM25 인덱스 재구축은 서버 재시작 시 반영
+            logger.info(f"문서 삭제 완료: {filename} ({len(results['ids'])}개 청크)")
+            return {
+                "status": "deleted",
+                "filename": filename,
+                "deleted_chunks": len(results["ids"]),
+                "remaining": coll.count(),
+            }
+        else:
+            raise HTTPException(status_code=404, detail=f"문서 '{filename}'을 찾을 수 없습니다")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _get_indexed_files(store: VectorStore) -> list[dict]:
+    """벡터스토어에 인덱싱된 파일 목록 조회"""
+    try:
+        coll = store._get_collection()
+        if coll.count() == 0:
+            return []
+
+        # 모든 메타데이터에서 고유 source 추출
+        all_data = coll.get(include=["metadatas"])
+        if not all_data or not all_data["metadatas"]:
+            return []
+
+        file_chunks: dict[str, int] = {}
+        for meta in all_data["metadatas"]:
+            source = meta.get("source", "unknown")
+            file_chunks[source] = file_chunks.get(source, 0) + 1
+
+        return [
+            {"filename": name, "chunks": count}
+            for name, count in sorted(file_chunks.items())
+        ]
+    except Exception:
+        return []
 
 
 def _chunk_text(text: str, chunk_size: int = 800) -> list[str]:
