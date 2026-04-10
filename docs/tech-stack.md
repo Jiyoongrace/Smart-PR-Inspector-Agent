@@ -10,7 +10,7 @@
 | Fallback LLM | **OpenAI GPT-4** | gpt-4-turbo | 대안 LLM |
 | Vector DB (Dense) | **ChromaDB** | 0.5.x | 도메인 문서 Dense 벡터 검색 (로컬, 무료) |
 | Sparse Search | **rank-bm25** | 0.2.x | BM25 Sparse 키워드 검색 (Hybrid RAG) |
-| Re-ranking | **sentence-transformers** | 3.3.x | Cross-Encoder Re-ranking (ms-marco-MiniLM) |
+| Re-ranking | **sentence-transformers** | 3.3.x | Cross-Encoder 기반 Re-ranking (ms-marco-MiniLM) |
 | Cache | **Redis** | 7.x | 세션 상태 캐싱 |
 | Validation | **Pydantic** | 2.x | Agent State 스키마 정의 |
 

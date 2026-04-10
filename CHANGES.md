@@ -57,7 +57,7 @@
 ### Hybrid RAG 고도화 (Dense + Sparse + Re-ranking)
 - `memory/vector_store.py` — Hybrid RAG 아키텍처 구현
   - BM25Index: Sparse 키워드 검색 인덱스 (rank-bm25)
-  - CrossEncoderReranker: Cross-Encoder Re-ranking (sentence-transformers, ms-marco-MiniLM)
+  - CrossEncoderReranker: Cross-Encoder 기반 Re-ranking (sentence-transformers, ms-marco-MiniLM)
   - reciprocal_rank_fusion(): Dense + Sparse 결과 RRF 통합
   - VectorStore.search(): Hybrid 검색 파이프라인 (Dense → Sparse → RRF → Re-ranking)
   - VectorStore.add_documents(): Dense + Sparse 동시 인덱싱
@@ -85,7 +85,7 @@
 
 ### 의존성 추가
 - `rank-bm25==0.2.2` — BM25 Sparse 검색
-- `sentence-transformers==3.3.1` — Cross-Encoder Re-ranking
+- `sentence-transformers==3.3.1` — Cross-Encoder 기반 Re-ranking
 
 ### SKILL.md 스킬 선언 시스템
 - `SKILL.md` — 11개 스킬 선언적 정의 (id, description, tools, model, prompt, HITL, retry, RAG 등)

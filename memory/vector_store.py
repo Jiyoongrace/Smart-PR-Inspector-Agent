@@ -1,6 +1,6 @@
 """
 벡터 스토어 관리 (ChromaDB + Hybrid RAG)
-Dense(벡터) + Sparse(BM25) 검색 후 Cross-Encoder Re-ranking
+Dense(벡터) + Sparse(BM25) 검색 후 Cross-Encoder 기반 Re-ranking
 """
 
 import logging
@@ -168,7 +168,7 @@ def reciprocal_rank_fusion(
 class VectorStore:
     """
     Hybrid RAG 벡터 스토어
-    Dense (ChromaDB) + Sparse (BM25) + Cross-Encoder Re-ranking
+    Dense (ChromaDB) + Sparse (BM25) + Cross-Encoder 기반 Re-ranking
     """
 
     def __init__(self, collection_name: str = "domain_docs"):
@@ -240,12 +240,12 @@ class VectorStore:
         use_reranking: bool = True,
     ) -> List[dict]:
         """
-        Hybrid 검색: Dense + Sparse → RRF 통합 → Cross-Encoder Re-ranking
+        Hybrid 검색: Dense + Sparse → RRF 통합 → Cross-Encoder 기반 Re-ranking
 
         Args:
             query: 검색 쿼리
             n_results: 최종 반환 문서 수
-            use_reranking: Cross-Encoder Re-ranking 사용 여부
+            use_reranking: Cross-Encoder 기반 Re-ranking 사용 여부
         """
         # 1단계: Dense 검색 (ChromaDB 벡터 유사도)
         dense_results = self._dense_search(query, n_results=20)
@@ -259,7 +259,7 @@ class VectorStore:
         # 3단계: RRF (Reciprocal Rank Fusion) 통합
         fused = reciprocal_rank_fusion(dense_results, sparse_results)
 
-        # 4단계: Cross-Encoder Re-ranking (선택적)
+        # 4단계: Cross-Encoder 기반 Re-ranking (선택적)
         if use_reranking and fused:
             final = self._reranker.rerank(query, fused, top_k=n_results)
         else:

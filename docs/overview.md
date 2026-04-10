@@ -51,7 +51,7 @@
 |------|------|
 | **Human-in-the-Loop** | 아키텍처 룰 위반 시 시니어 리뷰어에게 승인/반려 요청 (Merge Block) |
 | **병렬 처리** | Convention + Test Gen을 Fork/Join으로 동시 실행 (분석 시간 43% 단축) |
-| **Hybrid RAG** | Dense(벡터) + Sparse(BM25) + Cross-Encoder Re-ranking으로 도메인 문서 정밀 검색 |
+| **Hybrid RAG** | Dense(벡터) + Sparse(BM25) + Cross-Encoder 기반 Re-ranking으로 도메인 문서 정밀 검색 |
 | **재시도/폴백** | 테스트 실패 시 LLM 자동 수정 후 최대 3회 재시도, 실패해도 나머지 분석 계속 |
 
 ---
