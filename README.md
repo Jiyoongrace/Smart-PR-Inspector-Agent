@@ -3,7 +3,8 @@
 > LangGraph 기반 GitHub Pull Request 자동 분석 AI 에이전트 플랫폼
 
 > <a href="https://padlet.com/biz14/breakout-room/kxPM2kBAb0dO4gbV-qg3ezd5A12QEXwNP/wish/do3MQJwBKbJdZ15w
-"> 구현 영상 링크 </a>
+">구현 영상 링크</a>
+<img width="1469" height="795" alt="스크린샷 2026-04-10 오후 11 09 19" src="https://github.com/user-attachments/assets/4049a38f-85fe-481a-990b-fce2ae6e9327" />
 
 ### 🛠 Tech Stack
 
