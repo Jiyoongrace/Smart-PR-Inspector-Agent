@@ -226,26 +226,6 @@ flowchart TD
 ### 안전한 폴백
 벡터 컬렉션이 비어있을 때(`store.count() == 0`)는 검색을 스킵하고 **LLM이 코드만 보고 추론**합니다. PR 코멘트의 도메인 섹션에 **🔍 RAG 문서 기반** 또는 **🤖 코드 추론** 배지를 표시해 사용자가 분석 근거를 명확히 알 수 있습니다.
 
-### 팀 문서 업로드 API
-
-```bash
-# 팀 컨벤션 문서 업로드 → team_conventions 컬렉션
-curl -X POST http://localhost:8000/api/rag/upload/convention \
-  -F "file=@team-coding-guide.md"
-
-# 도메인 문서 업로드 → domain_docs 컬렉션
-curl -X POST http://localhost:8000/api/rag/upload/domain \
-  -F "file=@business-rules.md"
-
-# 인덱싱된 문서 목록 + 청크 수 조회
-curl http://localhost:8000/api/rag/stats
-
-# 특정 문서 삭제
-curl -X DELETE http://localhost:8000/api/rag/documents/domain/business-rules.md
-```
-
-대시보드 사이드바에서 GUI로도 같은 작업을 수행할 수 있습니다.
-
 ---
 
 ## 기술 스택
