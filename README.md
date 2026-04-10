@@ -299,77 +299,6 @@ curl -X DELETE http://localhost:8000/api/rag/documents/domain/business-rules.md
 
 ---
 
-## 빠른 시작
-
-### 1. 의존성 설치
-
-```bash
-# Python 환경
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-
-# 프론트엔드
-cd frontend && npm install
-```
-
-### 2. 환경변수 설정
-
-```bash
-cp .env.example .env
-```
-
-**필수**:
-- `ANTHROPIC_API_KEY` — Claude API 키 (`sk-ant-...`)
-- `GITHUB_TOKEN` — GitHub PAT (`repo`, `pull_requests:write` 권한)
-
-**선택** (해당 기능 사용 시):
-- `SLACK_BOT_TOKEN` + `SLACK_SIGNING_SECRET` — Slack 인터랙티브 (Bot Token 필요, Webhook URL은 인터랙션 처리 불가)
-- `SLACK_CHANNEL` — 알림 채널 (기본: `#pull-requests`)
-- `OPENAI_API_KEY` — Secondary LLM 사용 시
-- `REDIS_URL` — 기본 `redis://localhost:6379`
-- `CHROMA_HOST`, `CHROMA_PORT` — 기본 `localhost:8001`
-- `DATABASE_URL` — 기본 SQLite, PostgreSQL 사용 시 `postgresql+psycopg2://...`
-
-### 3. 실행
-
-```bash
-# 인프라만 Docker로 실행 (Redis + ChromaDB)
-docker-compose up -d redis chromadb
-
-# 백엔드 개발 모드
-uvicorn api.webhook:app --reload --port 8000
-
-# 프론트엔드 개발 모드 (별도 터미널)
-cd frontend && npm run dev
-```
-
-대시보드: <http://localhost:3000>
-API 문서: <http://localhost:8000/docs>
-
-### 4. GitHub Webhook 연결
-
-```bash
-# 로컬 서버 외부 노출
-ngrok http 8000
-
-# GitHub 레포 → Settings → Webhooks → Add webhook
-# Payload URL: https://xxx.ngrok.io/webhook/github
-# Content type: application/json
-# Secret: GITHUB_WEBHOOK_SECRET 환경변수와 동일
-# Events: Pull requests
-```
-
-### 5. Slack 앱 설정 (선택)
-
-Slack 인터랙티브 버튼을 사용하려면:
-1. <https://api.slack.com/apps> 에서 앱 생성
-2. **OAuth Scopes**: `chat:write`, `chat:write.public`, `channels:join`
-3. **Interactivity & Shortcuts > Request URL**: `https://xxx.ngrok.io/slack/interactions`
-4. 워크스페이스에 봇 설치 후 `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` `.env`에 등록
-
----
-
 ## 프로젝트 구조
 
 ```
@@ -433,31 +362,6 @@ smart-pr-inspector-agent/
 
 ---
 
-## 도메인 문서 인덱싱 (Python API)
-
-```python
-from agents.nodes.domain_explainer import DomainDocIngester
-
-# 디렉토리 일괄 인덱싱 (Hybrid: Dense + Sparse 동시)
-ingester = DomainDocIngester()
-ingester.ingest_markdown_dir("./docs/domain")
-
-# 단일 텍스트 인덱싱
-ingester.ingest_text("결제 모듈 환불 정책...", source="payment_v2.md")
-```
-
----
-
-## 테스트
-
-```bash
-pytest tests/ -v                              # 전체
-pytest tests/test_convention.py -v            # 특정 노드
-pytest tests/ --cov=agents --cov-report=html  # 커버리지
-```
-
----
-
 ## 문서
 
 - [`docs/overview.md`](docs/overview.md) — 프로젝트 개요
@@ -470,11 +374,3 @@ pytest tests/ --cov=agents --cov-report=html  # 커버리지
 - [`CHANGES.md`](CHANGES.md) — 버전별 변경 이력
 
 ---
-
-## 라이선스
-
-MIT License
-
-## 기여
-
-PR과 Issue 환영합니다.
