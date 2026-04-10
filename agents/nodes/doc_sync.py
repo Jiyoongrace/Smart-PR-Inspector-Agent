@@ -152,7 +152,51 @@ def _generate_update_draft(
     api_changes: List[Dict],
     updates: List[str],
 ) -> str:
-    """LLM으로 Swagger 업데이트 초안 생성"""
+    """API 변경사항을 Swagger UI 스타일의 시각적 컴포넌트로 렌더링
+
+    GitHub PR 코멘트는 Swagger UI를 직접 임베드할 수 없으므로,
+    Swagger UI 디자인을 모방한 메서드 배지 + 표 형식으로 표현합니다.
+    """
+    method_badges = {
+        "GET": "![GET](https://img.shields.io/badge/GET-61affe?style=for-the-badge)",
+        "POST": "![POST](https://img.shields.io/badge/POST-49cc90?style=for-the-badge)",
+        "PUT": "![PUT](https://img.shields.io/badge/PUT-fca130?style=for-the-badge)",
+        "DELETE": "![DELETE](https://img.shields.io/badge/DELETE-f93e3e?style=for-the-badge)",
+        "PATCH": "![PATCH](https://img.shields.io/badge/PATCH-50e3c2?style=for-the-badge)",
+    }
+
+    lines = ["### 📄 Swagger/OpenAPI 업데이트 필요", ""]
+    lines.append(f"총 **{len(api_changes)}개** API 변경이 감지되었습니다.")
+    lines.append("")
+
+    # 1. 시각적 요약 표 (Swagger UI 스타일)
+    lines.append("| 메서드 | 엔드포인트 | 상태 | 파일 |")
+    lines.append("|--------|-----------|------|------|")
+    for change in api_changes:
+        method = change["method"].upper()
+        badge = method_badges.get(method, f"`{method}`")
+        path = f"`{change['path']}`"
+        status = "🆕 신규" if change.get("is_new") else "📝 변경"
+        file = f"`{change['file'].split('/')[-1]}`"
+        lines.append(f"| {badge} | {path} | {status} | {file} |")
+    lines.append("")
+
+    # 2. 각 엔드포인트 상세 (접힘)
+    for change in api_changes:
+        method = change["method"].upper()
+        path = change["path"]
+        badge = method_badges.get(method, f"`{method}`")
+
+        lines.append(f"<details><summary>{badge} <code>{path}</code> 상세</summary>")
+        lines.append("")
+        lines.append(f"- **파일**: `{change['file']}`")
+        if change.get("function_sig"):
+            lines.append(f"- **시그니처**: `{change['function_sig']}`")
+        lines.append("")
+        lines.append("</details>")
+        lines.append("")
+
+    # 3. (선택) LLM 초안은 접힌 채로 제공 — 너무 길게 노출되지 않음
     try:
         from config.llm import call_llm
 
@@ -161,26 +205,24 @@ def _generate_update_draft(
             for c in api_changes
         ])
 
-        prompt = f"""다음 API 변경사항에 대한 Swagger/OpenAPI 문서 업데이트 초안을 YAML 형식으로 작성하세요.
+        prompt = f"""다음 API 변경사항에 대한 OpenAPI 3.0 paths 정의를 간결한 YAML로 작성하세요.
 
 감지된 변경:
 {changes_text}
 
-필요한 업데이트:
-{chr(10).join(updates)}
+요구사항:
+- paths 키 아래 각 엔드포인트의 summary, parameters(필요시), responses(200) 만 작성
+- 주석 없이 핵심만"""
 
-간결하게 핵심만 작성하고, 실제 Swagger 경로 정의 형식으로 출력하세요."""
-
-        draft = call_llm(prompt, max_tokens=1024)
-
-        header = "### 📄 Swagger/OpenAPI 업데이트 필요\n\n"
-        header += "\n".join(f"- {u}" for u in updates)
-        header += "\n\n**제안된 변경사항:**\n```yaml\n"
-        header += draft
-        header += "\n```"
-
-        return header
-
+        draft = call_llm(prompt, max_tokens=800)
+        lines.append("<details><summary>📝 제안된 OpenAPI YAML 초안 (클릭하여 펼치기)</summary>")
+        lines.append("")
+        lines.append("```yaml")
+        lines.append(draft.strip())
+        lines.append("```")
+        lines.append("")
+        lines.append("</details>")
     except Exception as e:
-        logger.warning(f"Swagger 초안 생성 실패: {e}")
-        return "### 📄 Swagger 업데이트 필요\n\n" + "\n".join(f"- {u}" for u in updates)
+        logger.warning(f"Swagger YAML 초안 생성 실패: {e}")
+
+    return "\n".join(lines)
