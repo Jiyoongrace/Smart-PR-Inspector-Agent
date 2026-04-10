@@ -1,6 +1,6 @@
 """
 RAG 기반 도메인 설명 노드
-Hybrid RAG (Dense + Sparse BM25) + Cross-Encoder Re-ranking으로
+Hybrid RAG (Dense + Sparse BM25) + Cross-Encoder 기반 Re-ranking으로
 비즈니스 영향도 설명 생성
 """
 
@@ -55,7 +55,7 @@ def _hybrid_search_domain_docs(query: str) -> Tuple[List[str], List[str]]:
     1. Dense (ChromaDB 벡터 검색) — 의미적 유사도
     2. Sparse (BM25 키워드 검색) — 정확한 용어 매칭
     3. RRF (Reciprocal Rank Fusion) — 결과 통합
-    4. Cross-Encoder Re-ranking — 최종 정밀 정렬
+    4. Cross-Encoder 기반 Re-ranking — 최종 정밀 정렬
     """
     try:
         from memory.vector_store import get_vector_store

@@ -7,7 +7,7 @@ Smart PR Inspector는 **LangGraph 기반 StateGraph**를 활용한 Planner-ReAct
 고급 아키텍처 요소:
 - **병렬 처리 (Fork/Join)**: Convention + Test Gen 동시 실행
 - **HITL (Human-in-the-Loop)**: 아키텍처 룰 위반 시 시니어 승인 대기
-- **Hybrid RAG**: Dense + Sparse(BM25) + Cross-Encoder Re-ranking
+- **Hybrid RAG**: Dense + Sparse(BM25) + Cross-Encoder 기반 Re-ranking
 - **조건부 재시도**: 테스트 실패 시 최대 3회 자동 수정 루프
 
 ```

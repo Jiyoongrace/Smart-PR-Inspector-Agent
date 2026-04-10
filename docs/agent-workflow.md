@@ -254,7 +254,7 @@ def should_retry(state: AgentState) -> str:
   │
   └── RRF (Reciprocal Rank Fusion) → Top-30 통합
       │
-      └── Cross-Encoder Re-ranking (ms-marco-MiniLM) → Top-5 최종
+      └── Cross-Encoder 기반 Re-ranking (ms-marco-MiniLM) → Top-5 최종
           │
           └── LLM 컨텍스트로 전달 → 비즈니스 영향도 설명 생성
 ```

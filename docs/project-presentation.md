@@ -4,34 +4,39 @@
 
 ## 1. 프로젝트 도식
 
-![Smart PR Inspector Agent Workflow](./agent-workflow-diagram.png)
+Smart PR Inspector Agent Workflow
 
 ### 다이어그램 범례
 
-| 색상 | 의미 |
-|------|------|
-| 🟦 파랑 | 외부 Tool 노드 (GitHub API, Docker, Slack) |
-| 🟨 주황 | LLM 호출 노드 (Claude / GPT) |
-| 🟪 보라 마름모 | 분기 조건 (아키텍처 룰 위반?, 테스트 결과?) |
-| 🟥 빨강 | Human-in-the-Loop (시니어 승인 대기) |
-| 🟩 초록 | 시작/종료 트리거 |
-| 🔵 하늘 | 외부 시스템 (ChromaDB) |
-| 🔴 빨강 파선 | 실패/재시도 경로 |
+
+| 색상        | 의미                                     |
+| --------- | -------------------------------------- |
+| 🟦 파랑     | 외부 Tool 노드 (GitHub API, Docker, Slack) |
+| 🟨 주황     | LLM 호출 노드 (Claude / GPT)               |
+| 🟪 보라 마름모 | 분기 조건 (아키텍처 룰 위반?, 테스트 결과?)            |
+| 🟥 빨강     | Human-in-the-Loop (시니어 승인 대기)          |
+| 🟩 초록     | 시작/종료 트리거                              |
+| 🔵 하늘     | 외부 시스템 (ChromaDB)                      |
+| 🔴 빨강 파선  | 실패/재시도 경로                              |
+
 
 ### 고급 아키텍처 요소
 
-| 요소 | 설명 | 왜 필요한가 |
-|------|------|------------|
-| **Human-in-the-Loop** | 아키텍처 룰 위반 시 시니어 리뷰어에게 알림 → 승인/반려 대기 | AI가 아키텍처 의사결정을 독단하지 않도록 인간의 통제 하에 둠 |
-| **재시도/폴백** | 테스트 실패 시 LLM 자동 수정 + 최대 3회 재시도. 실패해도 나머지 분석 계속 | LLM 오류로 전체 파이프라인 중단 방지 |
-| **Hybrid RAG** | Dense(벡터) + Sparse(BM25) + Cross-Encoder Re-ranking | 의미 검색 + 키워드 정확 매칭을 결합하여 도메인 문서 정밀 검색 |
-| **PR Health Score** | 4영역(컨벤션/테스트/영향도/도메인) 100점 만점 → S~F 등급 | 머지 가능 여부를 한눈에 판단 |
+
+| 요소                    | 설명                                                  | 왜 필요한가                               |
+| --------------------- | --------------------------------------------------- | ------------------------------------ |
+| **Human-in-the-Loop** | 아키텍처 룰 위반 시 시니어 리뷰어에게 알림 → 승인/반려 대기                 | AI가 아키텍처 의사결정을 독단하지 않도록 인간의 통제 하에 둠  |
+| **재시도/폴백**            | 테스트 실패 시 LLM 자동 수정 + 최대 3회 재시도. 실패해도 나머지 분석 계속      | LLM 오류로 전체 파이프라인 중단 방지               |
+| **Hybrid RAG**        | Dense(벡터) + Sparse(BM25) + Cross-Encoder 기반 Re-ranking | 의미 검색 + 키워드 정확 매칭을 결합하여 도메인 문서 정밀 검색 |
+| **PR Health Score**   | 4영역(컨벤션/테스트/영향도/도메인) 100점 만점 → S~F 등급               | 머지 가능 여부를 한눈에 판단                     |
+
 
 ---
 
 ## 2. 프로젝트 제목
 
 ### **Smart PR Inspector Agent**
+
 > AI 기반 GitHub Pull Request 자동 분석 플랫폼
 
 GitHub PR이 생성되면 자동으로 트리거되어, 코드 컨벤션 검증 → 테스트 시나리오 생성/평가 → 영향도 분석 → 비즈니스 설명 → 문서 동기화 → GitHub 코멘트 → Slack 알림까지 수행하는 지능형 코드 리뷰 에이전트입니다.
@@ -40,38 +45,43 @@ GitHub PR이 생성되면 자동으로 트리거되어, 코드 컨벤션 검증 
 
 ## 3. 해결하고자 한 Pain Point
 
-| Pain Point | 구체적 문제 | 빈도 | 영향도 |
-|------------|-----------|------|--------|
-| **리뷰 병목** | 시니어 1명이 하루 10+ PR 리뷰 | 매일 | 높음 |
-| **컨벤션 위반 반복** | 네이밍, 타입힌트 등 같은 지적 반복 | PR당 3회 | 중간 |
-| **사이드 이펙트 미탐지** | 코드 변경이 타 모듈에 미치는 영향 파악 불가 | 월 5회 | 치명적 |
-| **문서 불일치** | API 변경 후 Swagger 미업데이트 | 월 8회 | 높음 |
-| **도메인 이해 부족** | 비즈니스 로직 변경 설명 부재 | PR당 1회 | 중간 |
+
+| Pain Point      | 구체적 문제                    | 빈도     | 영향도 |
+| --------------- | ------------------------- | ------ | --- |
+| **리뷰 병목**       | 시니어 1명이 하루 10+ PR 리뷰      | 매일     | 높음  |
+| **컨벤션 위반 반복**   | 네이밍, 타입힌트 등 같은 지적 반복      | PR당 3회 | 중간  |
+| **사이드 이펙트 미탐지** | 코드 변경이 타 모듈에 미치는 영향 파악 불가 | 월 5회   | 치명적 |
+| **문서 불일치**      | API 변경 후 Swagger 미업데이트    | 월 8회   | 높음  |
+| **도메인 이해 부족**   | 비즈니스 로직 변경 설명 부재          | PR당 1회 | 중간  |
+
 
 ---
 
-## 4. 현재 구현된 정도 (v1.3.0)
+## 4. 현재 구현된 정도
 
-| 기능 | 상태 |
-|------|------|
-| LangGraph 11노드 오케스트레이터 (HITL + 재시도) | ✅ |
-| AST + LLM + RAG 하이브리드 컨벤션 검증 | ✅ |
-| AI BDD 시나리오 생성/평가 (Given/When/Then) | ✅ |
-| 아키텍처 룰 점검 + HITL 승인 대기 | ✅ |
-| AST 호출그래프 + LLM 비즈니스 영향도 분석 | ✅ |
-| Hybrid RAG 도메인 설명 (Dense+Sparse+Re-ranking) | ✅ |
-| 팀 컨벤션/도메인 문서 업로드 → RAG 인덱싱 | ✅ |
-| PR Health Score (100점 만점, S~F 등급) | ✅ |
-| Slack 인터랙티브 (승인 메시지 + 수정 영역 선택) | ✅ |
-| Next.js 14 대시보드 + AI 채팅 | ✅ |
-| SKILL.md 선언적 스킬 정의 + 레지스트리 | ✅ |
-| SSE 실시간 스트리밍 + 이력 관리 | ✅ |
+
+| 기능                                          | 상태  |
+| ------------------------------------------- | --- |
+| LangGraph 11노드 오케스트레이터 (HITL + 재시도)         | ✅   |
+| AST + LLM + RAG 하이브리드 컨벤션 검증                | ✅   |
+| AI BDD 시나리오 생성/평가 (Given/When/Then)         | ✅   |
+| 아키텍처 룰 점검 + HITL 승인 대기                      | ✅   |
+| AST 호출그래프 + LLM 비즈니스 영향도 분석                 | ✅   |
+| Hybrid RAG 도메인 설명 (Dense+Sparse+Re-ranking) | ✅   |
+| 팀 컨벤션/도메인 문서 업로드 → RAG 인덱싱                  | ✅   |
+| PR Health Score (100점 만점, S~F 등급)           | ✅   |
+| Slack 인터랙티브 (승인 메시지 + 수정 영역 선택)             | ✅   |
+| Next.js 14 대시보드 + AI 채팅                     | ✅   |
+| SKILL.md 선언적 스킬 정의 + 레지스트리                  | ✅   |
+| SSE 실시간 스트리밍 + 이력 관리                        | ✅   |
+
 
 ---
 
 ## 5. 사용한 에이전트 프레임워크: LangGraph
 
 LangGraph의 `StateGraph`를 사용한 이유:
+
 - **조건부 분기**: `add_conditional_edges`로 HITL 승인/반려, 테스트 재시도 자연스럽게 구현
 - **비동기 스트리밍**: `astream()`으로 SSE 실시간 업데이트
 - **Pydantic State**: 타입 안전한 상태 관리
@@ -93,32 +103,36 @@ workflow.add_conditional_edges("test_run", should_retry,
 
 ---
 
-## 6. 유저 쿼리문
+## 6. 워크플로우 Trigger (진입점)
 
-| 시나리오 | 흐름 |
-|---------|------|
-| **Webhook 자동** | PR 생성 → Webhook → 11노드 분석 → GitHub 코멘트 + Slack 알림 |
-| **수동 분석** | 대시보드에서 repo/PR# 입력 → SSE 실시간 노드 상태 표시 |
-| **AI 채팅** | "이 PR에서 가장 위험한 변경은?" → Claude가 분석 결과 기반 답변 |
-| **Slack 승인** | ✅ 버튼 → "~~~ 기능 PR 승인했습니다" 메시지 |
-| **Slack 수정요청** | 🔄 버튼 → 수정 영역 선택 → "~~~ 기능 [영역] 수정 요청하였습니다" |
+이 에이전트는 자연어 쿼리로 호출되는 챗봇이 아니라, **이벤트/화면/메시지 기반 4가지 Trigger**로 워크플로우가 시작되는 구조입니다. 모든 Trigger는 동일한 LangGraph StateGraph(또는 그 결과물)를 공유하므로 결과 일관성이 보장됩니다.
+
+| # | Trigger | 발생 위치 | 입력 형태 | 동작 |
+|---|---------|----------|----------|------|
+| ① | **GitHub Webhook 자동** | GitHub | `pull_request.opened` 이벤트 | 11노드 그래프 자동 실행 → GitHub 코멘트 + Slack 알림 게시 |
+| ② | **대시보드 수동 실행** | Next.js 화면 | `repo` + `PR 번호` 폼 입력 | `POST /api/analyze` → SSE 스트리밍으로 노드 진행 상태 실시간 표시 |
+| ③ | **AI 채팅** | 화면 우측 ChatPanel | 자연어 (예: *"가장 위험한 변경은?"*) | 분석 결과를 컨텍스트로 Claude가 답변 (그래프는 재실행하지 않음) |
+| ④ | **Slack 인터랙티브 버튼** | Slack 알림 메시지 | ✅ 승인 / 🔄 수정 요청 클릭 | `POST /slack/interactions` → GitHub Approve·Request Changes 자동 제출 + 채널 응답 메시지 |
+
 
 ---
 
 ## 7. 사용한 Tools
 
-| Tool | 용도 | 노드 |
-|------|------|------|
-| **ast** | Python AST 파싱, 호출 그래프 | convention, impact |
-| **PyGithub** | GitHub REST API | fetcher, commenter |
-| **ChromaDB** | Dense 벡터 검색 | domain_explain, convention (RAG) |
-| **rank-bm25** | BM25 Sparse 키워드 검색 | domain_explain, convention (RAG) |
-| **sentence-transformers** | Cross-Encoder Re-ranking | domain_explain |
-| **OpenAI SDK** | GPT-4o-mini LLM 호출 | convention, test_gen, impact 등 |
-| **Anthropic SDK** | AI 채팅 | ChatPanel |
-| **Slack SDK** | Block Kit 메시지 + 인터랙션 | slack_notify |
-| **Redis** | 분석 결과 캐싱 | webhook |
-| **SQLAlchemy** | 분석 이력 저장 | history |
+
+| Tool                      | 용도                       | 노드                               |
+| ------------------------- | ------------------------ | -------------------------------- |
+| **ast**                   | Python AST 파싱, 호출 그래프    | convention, impact               |
+| **PyGithub**              | GitHub REST API          | fetcher, commenter               |
+| **ChromaDB**              | Dense 벡터 검색              | domain_explain, convention (RAG) |
+| **rank-bm25**             | BM25 Sparse 키워드 검색       | domain_explain, convention (RAG) |
+| **sentence-transformers** | Cross-Encoder 기반 Re-ranking | domain_explain                   |
+| **OpenAI SDK**            | GPT-4o-mini LLM 호출       | convention, test_gen, impact 등   |
+| **OpenAI SDK**            | AI 채팅                    | ChatPanel                        |
+| **Slack SDK**             | Block Kit 메시지 + 인터랙션     | slack_notify                     |
+| **Redis**                 | 분석 결과 캐싱                 | webhook                          |
+| **SQLAlchemy**            | 분석 이력 저장                 | history                          |
+
 
 ---
 
@@ -151,45 +165,34 @@ API: `GET /api/skills` — 전체 스킬 목록 + 워크플로우 정보 조회
 쿼리 (PR diff + title)
   ├── Dense: ChromaDB 벡터 검색 → Top-20
   ├── Sparse: BM25 키워드 검색 → Top-20
-  └── RRF 통합 → Cross-Encoder Re-ranking → Top-5 → LLM 컨텍스트
+  └── RRF 통합 → Cross-Encoder 기반 Re-ranking → Top-5 → LLM 컨텍스트
 ```
 
 ### RAG가 활용되는 2곳
 
-| 노드 | RAG 활용 방식 | 벡터스토어 |
-|------|-------------|-----------|
-| **convention** | 팀 컨벤션 문서를 RAG 검색 → LLM에 팀 규칙 컨텍스트 전달 | `team_conventions` |
-| **domain_explain** | 도메인 문서를 RAG 검색 → 비즈니스 영향도 설명 생성 | `domain_docs` |
 
-### 팀 문서 업로드 API
+| 노드                 | RAG 활용 방식                            | 벡터스토어              |
+| ------------------ | ------------------------------------ | ------------------ |
+| **convention**     | 팀 컨벤션 문서를 RAG 검색 → LLM에 팀 규칙 컨텍스트 전달 | `team_conventions` |
+| **domain_explain** | 도메인 문서를 RAG 검색 → 비즈니스 영향도 설명 생성      | `domain_docs`      |
 
-```bash
-# 팀 컨벤션 문서 업로드
-curl -X POST http://localhost:8000/api/rag/upload/convention \
-  -F "file=@team-coding-guide.md" -F "team_name=backend"
-
-# 도메인 문서 업로드
-curl -X POST http://localhost:8000/api/rag/upload/domain \
-  -F "file=@business-rules.md" -F "team_name=backend"
-
-# RAG 인덱스 통계
-curl http://localhost:8000/api/rag/stats
-```
 
 ---
 
 ## 10. 중간 노드 결과값 (요약)
 
-| 노드 | 주요 출력 |
-|------|----------|
-| fetch | `pr_data` (diff, changed_files, author, title, labels) |
-| convention | `convention_result` (violations list, passed, summary) + RAG 팀 규칙 반영 |
-| test_gen | `test_result.scenarios` (Given/When/Then BDD 시나리오) |
-| arch_review | `arch_review` (violations, approval_status: approved/rejected) |
-| test_run | `test_result` (verdict, reasoning, confidence per scenario) |
-| impact | `impact_analysis` (risk_level, affected_modules, business_impact) |
-| domain_explain | `domain_explanation` (200자 비즈니스 설명, Hybrid RAG 기반) |
-| doc_sync | `doc_updates` (Swagger 업데이트 YAML 초안) |
+
+| 노드             | 주요 출력                                                                |
+| -------------- | -------------------------------------------------------------------- |
+| fetch          | `pr_data` (diff, changed_files, author, title, labels)               |
+| convention     | `convention_result` (violations list, passed, summary) + RAG 팀 규칙 반영 |
+| test_gen       | `test_result.scenarios` (Given/When/Then BDD 시나리오)                   |
+| arch_review    | `arch_review` (violations, approval_status: approved/rejected)       |
+| test_run       | `test_result` (verdict, reasoning, confidence per scenario)          |
+| impact         | `impact_analysis` (risk_level, affected_modules, business_impact)    |
+| domain_explain | `domain_explanation` (200자 비즈니스 설명, Hybrid RAG 기반)                   |
+| doc_sync       | `doc_updates` (Swagger 업데이트 초안)                                      |
+
 
 ---
 
@@ -232,50 +235,50 @@ PR #42: feat: 결제 모듈 리팩토링 | @jiyoon
 
 ## 12. 이 외 사항
 
-| 항목 | 사용 여부 | 설명 |
-|------|----------|------|
-| **SKILL.md** | ✅ 사용 | 11개 스킬 선언적 정의 + SkillRegistry 파서 |
-| **System Prompt** | ✅ 사용 | `config/prompts.py`에 10개 LLM 프롬프트 중앙 관리 |
-| **Middleware** | ✅ 사용 | CORS, GitHub Webhook 서명 검증 (HMAC-SHA256) |
-| **conventions.yaml** | ✅ 사용 | 팀 코딩 규칙 YAML 정의 (AST 검사용) |
-| **Docker 격리** | ✅ 사용 | 테스트 실행 시 컨테이너 격리 (메모리/CPU 제한) |
-| **Prometheus** | ✅ 사용 | `/metrics` 분석 횟수, 소요 시간 메트릭 |
+
+| 항목                   | 사용 여부 | 설명                                       |
+| -------------------- | ----- | ---------------------------------------- |
+| **SKILL.md**         | ✅ 사용  | 11개 스킬 선언적 정의 + SkillRegistry 파서         |
+| **System Prompt**    | ✅ 사용  | `config/prompts.py`에 10개 LLM 프롬프트 중앙 관리  |
+| **Middleware**       | ✅ 사용  | CORS, GitHub Webhook 서명 검증 (HMAC-SHA256) |
+| **conventions.yaml** | ✅ 사용  | 팀 코딩 규칙 YAML 정의 (AST 검사용)                |
+| **Docker 격리**        | ✅ 사용  | 테스트 실행 시 컨테이너 격리 (메모리/CPU 제한)            |
+| **Prometheus**       | ✅ 사용  | `/metrics` 분석 횟수, 소요 시간 메트릭              |
+
 
 ---
 
 ## 13. 앞으로의 고도화 계획
 
-| 기능 | 우선순위 |
-|------|---------|
-| LLM 모델 Anthropic Claude로 전환 (분석 품질 향상) | P1 |
-| 과거 PR 리뷰 패턴 학습 RAG (개발자별 맞춤 피드백) | P1 |
-| Multi-language 지원 (JS, TS, Java AST 분석) | P2 |
-| 레포 자동 학습 RAG (새 레포 분석 시 README/구조 자동 인덱싱) | P2 |
-| 외부 규제/표준 문서 RAG (PCI-DSS, HIPAA 등 컴플라이언스) | P3 |
+
+| 기능                                      | 우선순위 |
+| --------------------------------------- | ---- |
+| LLM 모델 Anthropic Claude로 전환 (분석 품질 향상)  | P1   |
+| 과거 PR 리뷰 패턴 학습 RAG (개발자별 맞춤 피드백)        | P1   |
+| Multi-language 지원 (JS, TS, Java AST 분석) | P2   |
+
 
 ---
 
 ## 부록: 기술 스택
 
-| 분류 | 기술 |
-|------|------|
-| 에이전트 | LangGraph 0.2.x (StateGraph) |
-| LLM | OpenAI GPT-4o-mini (분석), Anthropic Claude (채팅) |
-| RAG | ChromaDB + rank-bm25 + sentence-transformers (Hybrid) |
-| 백엔드 | Python 3.11, FastAPI, Pydantic v2 |
-| 프론트엔드 | Next.js 14, TypeScript, Tailwind CSS, Zustand |
-| 인프라 | Docker Compose, Redis, SQLAlchemy |
-| 외부 연동 | GitHub API, Slack API |
 
----
+| 분류    | 기술                                                    |
+| ----- | ----------------------------------------------------- |
+| 에이전트  | LangGraph 0.2.x (StateGraph)                          |
+| LLM   | OpenAI GPT (분석 및 채팅)                                  |
+| RAG   | ChromaDB + rank-bm25 + sentence-transformers (Hybrid) |
+| 백엔드   | Python 3.11, FastAPI                                  |
+| 프론트엔드 | Next.js 14, TypeScript, Tailwind CSS, Zustand         |
+| 인프라   | Docker Compose, Redis, SQLAlchemy                     |
+| 외부 연동 | GitHub API, Slack API                                 |
 
-*v1.3.0 (2026-04-10) 기준*
 
 ---
 
 # 📢 발표 대본 (Presentation Script)
 
-> **회사/부서/이름**: [회사명] / [부서명] / **배지윤 (Jiyoon Bae)**
+> **회사/부서/이름**: 포스코DX / 플래닝물류섹션 / **배지윤 (Jiyoon Bae)**
 > **발표 주제**: Smart PR Inspector Agent — LangGraph 기반 GitHub PR 자동 분석 에이전트
 > **발표 시간**: 약 10~12분
 > **데모 환경**: Next.js 14 대시보드 + LangGraph 워크플로우 화면
@@ -339,20 +342,30 @@ DeepAgent도 검토했지만, **명시적 노드 그래프와 분기 제어가 �
 
 ---
 
-## 🎬 [3:00–4:00] 4. 유저 쿼리문 — 4가지 진입 경로
+## 🎬 [3:00–4:00] 4. 워크플로우 Trigger — 화면에서의 4가지 진입점
 
-사용자가 이 시스템과 상호작용하는 방식은 4가지입니다.
+이 에이전트는 *"어떤 자연어 명령을 받느냐"*가 아니라, **어디서 어떤 이벤트가 발생하느냐**로 워크플로우가 시작되는 구조입니다. Trigger는 총 4가지입니다.
 
-첫째, **Webhook 자동 트리거**. PR이 열리면 즉시 11노드가 백그라운드에서 실행됩니다.
-둘째, **수동 분석**. 대시보드에서 repo와 PR 번호를 입력하면 SSE 스트리밍으로 노드 상태가 실시간 표시됩니다.
-셋째, **AI 채팅**. 화면 오른쪽 채팅 패널에 *"이 PR에서 가장 위험한 변경은?"* 같은 자연어 질문을 던지면 분석 결과를 컨텍스트로 한 답변이 옵니다.
-넷째, **Slack 인터랙티브**. Slack에 도착한 알림에서 ✅ 승인 버튼을 누르면 GitHub Approve가 자동 제출되고, 🔄 수정 요청을 누르면 *"어떤 영역(코드/컨벤션/테스트/문서/보안/아키텍처)을 수정해야 하는지"* 선택 메뉴가 나옵니다.
+**① GitHub Webhook 자동 Trigger**
+PR이 열리는 순간 GitHub이 `pull_request.opened` 이벤트를 보냅니다. 사람이 아무것도 누르지 않아도 11노드 그래프가 백그라운드에서 자동 실행됩니다. 가장 일반적인 진입 경로입니다.
+
+**② 대시보드 수동 Trigger**
+지금 화면에 보이시는 Next.js 대시보드에서, repo 이름과 PR 번호를 폼에 입력하고 분석 버튼을 누르면 `POST /api/analyze`가 호출됩니다. 이때 SSE 스트리밍으로 **각 노드가 끝날 때마다 화면이 실시간으로 갱신**됩니다. 데모용으로 가장 효과적인 경로입니다.
+
+**③ AI 채팅 Trigger**
+화면 오른쪽 ChatPanel에 *"이 PR에서 가장 위험한 변경은?"* 같은 자연어 질문을 던지면, Claude가 **이미 실행된 분석 결과를 컨텍스트로** 답변합니다. 여기서 중요한 건, 채팅은 LangGraph 그래프를 재실행하지 않는다는 점입니다. 즉, 분석은 ①, ②에서만 일어나고, ③은 결과 위에서 대화하는 레이어입니다.
+
+**④ Slack 인터랙티브 Trigger**
+Slack에 도착한 분석 알림에서 ✅ 승인 버튼을 누르면 `POST /slack/interactions`로 페이로드가 들어와서 GitHub Approve가 자동 제출됩니다. 🔄 수정 요청을 누르면 *"어떤 영역(코드/컨벤션/테스트/문서/보안/아키텍처)을 수정해야 하는지"* 선택 메뉴가 나오고, 선택 즉시 GitHub에 Request Changes가 등록됩니다.
+
+> **여기서 강조하고 싶은 한 가지는**, 4가지 Trigger가 전부 **동일한 LangGraph StateGraph와 동일한 AgentState 모델**을 공유한다는 점입니다. Webhook으로 들어왔든, 화면에서 수동 실행했든, 결과의 형태와 일관성이 동일하게 보장됩니다.
 
 ---
 
 ## 🎬 [4:00–5:00] 5. 사용한 Tools & MCPs & Skills
 
 **Tools**는 총 10가지를 사용합니다. 가장 중요한 것만 소개드리면,
+
 - **Python AST**: 컨벤션 검증과 호출 그래프 생성
 - **PyGithub**: GitHub REST API 호출
 - **ChromaDB + rank-bm25 + sentence-transformers**: Hybrid RAG 파이프라인
@@ -396,7 +409,9 @@ DeepAgent도 검토했지만, **명시적 노드 그래프와 분기 제어가 �
 
 RAG 부분을 검증한 결과, **두 노드에서 유사도 검색이 실제로 동작**합니다.
 
-`convention` 노드는 `team_conventions` ChromaDB 컬렉션에서, `domain_explain` 노드는 `domain_docs` 컬렉션에서 검색합니다. 파이프라인은 **Dense(ChromaDB 벡터) + Sparse(BM25) → RRF 통합 → Cross-Encoder Re-ranking** 4단계입니다.
+`convention` 노드는 `team_conventions` ChromaDB 컬렉션에서, `domain_explain` 노드는 `domain_docs` 컬렉션에서 검색합니다. 파이프라인은 **Dense(ChromaDB 벡터) + Sparse(BM25) → RRF 통합 → Re-ranking** 4단계이고, Re-ranking 단계의 모델로 **Cross-Encoder(ms-marco-MiniLM)** 를 사용합니다.
+
+> 한 가지 짚어둘 점은, **Re-ranking은 단계(stage)이고 Cross-Encoder는 그 단계에서 사용하는 모델**이라는 것입니다. 둘은 동의어가 아니라 *"Re-ranking 단계 안에서 Cross-Encoder 모델을 쓴다"*는 포함 관계입니다. Re-ranking은 LLM 리랭커나 listwise 리랭커로도 구현할 수 있는데, 저희는 정확도와 속도 균형을 고려해서 Cross-Encoder를 선택했습니다.
 
 중요한 안전장치가 하나 있는데, **벡터 컬렉션이 비어있을 때**(`store.count() == 0`)는 검색을 스킵하고 빈 결과를 반환합니다. 이 경우 LLM은 **순수하게 코드만 보고 추론**합니다. 그래서 PR 코멘트의 도메인 섹션에 **"🔍 RAG 문서 기반"** 또는 **"🤖 코드 추론"** 배지를 표시해서 **분석 근거가 무엇인지 사용자가 명확히 알 수 있도록** 했습니다.
 
@@ -425,6 +440,7 @@ Slack 메시지는 Block Kit으로 만들었고, 인터랙티브 버튼이 있�
 ## 🎬 [9:00–10:00] 11. 앞으로의 고도화 계획 & 예상 파급효과
 
 **고도화 계획**은 5가지입니다.
+
 1. LLM을 OpenAI에서 Anthropic Claude Sonnet 4.6으로 전면 전환해서 분석 품질을 끌어올립니다.
 2. **개발자별 과거 PR 리뷰 패턴 학습 RAG**를 추가해서 *"김개발자는 항상 docstring을 빠뜨리니 이번에도 확인하라"* 같은 맞춤 피드백을 제공합니다.
 3. JS, TS, Java AST 분석으로 **다중 언어 지원**.
@@ -432,6 +448,7 @@ Slack 메시지는 Block Kit으로 만들었고, 인터랙티브 버튼이 있�
 5. **PCI-DSS, HIPAA 같은 외부 컴플라이언스 문서 RAG**.
 
 **예상 파급효과**는 다음과 같습니다.
+
 - 시니어 1명이 처리하던 하루 10개 PR 리뷰 부담을 **AI가 1차 분석을 끝낸 뒤 사람이 20초 안에 머지 결정**할 수 있는 구조로 전환됩니다. 보수적으로 잡아도 **PR당 평균 리뷰 시간 30분 → 5분**, **리뷰 처리량 5배** 증가가 가능합니다.
 - 컨벤션 위반 반복 지적이 RAG로 자동화되면서 **PR당 평균 3건 지적이 0.5건 이하**로 감소할 것으로 예상됩니다.
 - 가장 큰 효과는 **사이드 이펙트 미탐지로 인한 운영 사고**입니다. 월 5건의 치명적 사고를 AST 호출 그래프 + 영향도 분석으로 **사전에 80% 이상 차단**하는 것이 목표입니다.
@@ -442,19 +459,18 @@ Slack 메시지는 Block Kit으로 만들었고, 인터랙티브 버튼이 있�
 
 정리하면, Smart PR Inspector Agent는 **LangGraph 11노드 워크플로우 + Hybrid RAG + HITL + Slack 인터랙티브**를 결합해서, 단순한 린터가 아닌 **비즈니스 컨텍스트를 이해하는 AI 코드 리뷰 동료**를 만드는 것이 목표입니다.
 
-데모는 [https://github.com/...] 에서 확인하실 수 있고, 질문 받겠습니다. 감사합니다.
-
 ---
 
 ### 📋 발표 체크리스트
 
-| 시간 | 섹션 | 데모 화면 |
-|------|------|----------|
-| 0:00 | 오프닝 | Next.js 대시보드 메인 |
-| 1:30 | 워크플로우 | 11노드 그래프 실행 화면 |
-| 4:00 | 유저 쿼리 | Slack 알림 + 채팅 패널 |
-| 5:00 | 노드 결과 | PR #42 결과 페이지 |
-| 7:30 | RAG | 사이드바 인덱싱 문서 목록 |
+
+| 시간   | 섹션    | 데모 화면                        |
+| ---- | ----- | ---------------------------- |
+| 0:00 | 오프닝   | Next.js 대시보드 메인              |
+| 1:30 | 워크플로우 | 11노드 그래프 실행 화면               |
+| 4:00 | 유저 쿼리 | Slack 알림 + 채팅 패널             |
+| 5:00 | 노드 결과 | PR #42 결과 페이지                |
+| 7:30 | RAG   | 사이드바 인덱싱 문서 목록               |
 | 8:30 | 최종 결과 | GitHub PR 코멘트 (Health Score) |
 
 

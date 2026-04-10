@@ -77,7 +77,7 @@
 1. 도메인 문서를 ChromaDB(Dense) + BM25(Sparse)에 동시 인덱싱
 2. PR title + diff를 쿼리로 **Dense 검색**(의미적 유사도) + **Sparse 검색**(키워드 매칭)
 3. **RRF (Reciprocal Rank Fusion)** 로 두 결과를 통합
-4. **Cross-Encoder Re-ranking** (ms-marco-MiniLM)으로 최종 Top-5 정밀 정렬
+4. **Cross-Encoder 기반 Re-ranking** (ms-marco-MiniLM)으로 최종 Top-5 정밀 정렬
 5. 검색된 문서 + 코드 Diff를 LLM에게 전달 → 비즈니스 영향도 200자 설명 생성
 
 **Hybrid의 장점**:
