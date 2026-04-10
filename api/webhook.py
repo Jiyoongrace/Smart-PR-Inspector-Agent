@@ -704,6 +704,50 @@ async def health():
     return {"status": "healthy", "version": "1.2.0"}
 
 
+@app.get("/health/detail")
+async def health_detail() -> dict:
+    """상세 헬스체크 - 의존 서비스(Redis / ChromaDB / LLM) 상태까지 포함해 반환"""
+    from datetime import datetime, timezone
+
+    components: dict[str, str] = {
+        "api": "healthy",
+        "redis": "unknown",
+        "chromadb": "unknown",
+        "llm": "unknown",
+    }
+
+    try:
+        import redis  # type: ignore
+
+        client = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"))
+        client.ping()
+        components["redis"] = "healthy"
+    except Exception as exc:
+        logger.warning(f"Redis 헬스체크 실패: {exc}")
+        components["redis"] = "unhealthy"
+
+    try:
+        from memory.vector_store import get_vector_store
+
+        store = get_vector_store()
+        _ = store.count()
+        components["chromadb"] = "healthy"
+    except Exception as exc:
+        logger.warning(f"ChromaDB 헬스체크 실패: {exc}")
+        components["chromadb"] = "unhealthy"
+
+    components["llm"] = "configured" if os.getenv("ANTHROPIC_API_KEY") else "missing_key"
+
+    overall = "healthy" if all(v in {"healthy", "configured"} for v in components.values()) else "degraded"
+
+    return {
+        "status": overall,
+        "version": "1.2.0",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "components": components,
+    }
+
+
 @app.get("/api/skills")
 async def list_skills():
     """SKILL.md에서 로드된 스킬 목록 조회"""
