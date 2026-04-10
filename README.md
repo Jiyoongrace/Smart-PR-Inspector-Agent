@@ -270,7 +270,7 @@ smart-pr-inspector-agent/
 - [`docs/agent-workflow.md`](docs/agent-workflow.md) — 11노드 상세 설명
 - [`docs/features.md`](docs/features.md) — 기능 상세
 - [`docs/tech-stack.md`](docs/tech-stack.md) — 기술 스택
-- [`docs/project-presentation.md`](docs/project-presentation.md) — 프로젝트 종합 문서 + 발표 대본
+- [`docs/project-presentation.md`](docs/project-presentation.md) — 프로젝트 종합 문서
 - [`SKILL.md`](SKILL.md) — 11개 스킬 선언적 정의
 - [`CHANGES.md`](CHANGES.md) — 버전별 변경 이력
 
