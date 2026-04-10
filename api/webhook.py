@@ -748,6 +748,27 @@ async def health_detail() -> dict:
     }
 
 
+@app.get("/api/version")
+async def version_info() -> dict:
+    """버전 및 빌드 메타 정보 조회 - 대시보드 푸터·About 화면에서 사용"""
+    import platform
+    import sys
+
+    return {
+        "name": "Smart PR Inspector Agent",
+        "version": "1.2.0",
+        "python": sys.version.split()[0],
+        "platform": platform.system(),
+        "features": [
+            "LangGraph 11-node workflow",
+            "Hybrid RAG (Dense + BM25 + Cross-Encoder)",
+            "HITL architecture review",
+            "Slack interactive approval",
+            "SSE streaming dashboard",
+        ],
+    }
+
+
 @app.get("/api/skills")
 async def list_skills():
     """SKILL.md에서 로드된 스킬 목록 조회"""
