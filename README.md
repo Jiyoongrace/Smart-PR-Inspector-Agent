@@ -2,11 +2,52 @@
 
 > LangGraph 기반 GitHub Pull Request 자동 분석 AI 에이전트 플랫폼
 
-[![Python](https://img.shields.io/badge/Python-3.11-blue)](https://python.org)
-[![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org)
-[![LangGraph](https://img.shields.io/badge/LangGraph-0.2.x-orange)](https://langchain-ai.github.io/langgraph/)
-[![Claude](https://img.shields.io/badge/Claude-Anthropic-purple)](https://anthropic.com)
-[![Hybrid RAG](https://img.shields.io/badge/RAG-Dense%2BSparse%2BReranking-green)](#-rag-파이프라인)
+### 🛠 Tech Stack
+
+**Core AI / Agent**
+[![LangGraph](https://img.shields.io/badge/LangGraph-0.2.x-1C3C3C?logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
+[![LangChain](https://img.shields.io/badge/LangChain-0.3-1C3C3C?logo=langchain&logoColor=white)](https://www.langchain.com/)
+[![Claude](https://img.shields.io/badge/Claude_Sonnet_4-Anthropic-D97757?logo=anthropic&logoColor=white)](https://anthropic.com)
+[![Anthropic SDK](https://img.shields.io/badge/Anthropic_SDK-Python-191919?logo=anthropic&logoColor=white)](https://docs.anthropic.com/)
+[![HITL](https://img.shields.io/badge/Human--in--the--Loop-Approval_Flow-8A2BE2)](#)
+[![SKILL.md](https://img.shields.io/badge/SKILL.md-Declarative_Skills-FF6F61)](#)
+
+**Hybrid RAG Pipeline**
+[![ChromaDB](https://img.shields.io/badge/ChromaDB-Vector_Store-FF6B6B?logo=databricks&logoColor=white)](https://www.trychroma.com/)
+[![BM25](https://img.shields.io/badge/BM25-Sparse_Retrieval-4B8BBE)](#)
+[![Cross-Encoder](https://img.shields.io/badge/Cross--Encoder-Re--ranking-22C55E)](#)
+[![Sentence Transformers](https://img.shields.io/badge/Sentence--Transformers-Embeddings-FFBB00?logo=huggingface&logoColor=black)](https://www.sbert.net/)
+[![HuggingFace](https://img.shields.io/badge/HuggingFace-Models-FFD21E?logo=huggingface&logoColor=black)](https://huggingface.co/)
+
+**Backend**
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Pydantic](https://img.shields.io/badge/Pydantic-v2-E92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
+[![Uvicorn](https://img.shields.io/badge/Uvicorn-ASGI-499848?logo=gunicorn&logoColor=white)](https://www.uvicorn.org/)
+[![SSE](https://img.shields.io/badge/SSE-Streaming-FF4500)](#)
+[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-ORM-D71F00?logo=sqlalchemy&logoColor=white)](https://www.sqlalchemy.org/)
+
+**Frontend**
+[![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org)
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
+[![Radix UI](https://img.shields.io/badge/Radix_UI-Headless-161618?logo=radixui&logoColor=white)](https://www.radix-ui.com/)
+[![Zustand](https://img.shields.io/badge/Zustand-State-443E38)](https://zustand-demo.pmnd.rs/)
+[![Framer Motion](https://img.shields.io/badge/Framer_Motion-Animation-0055FF?logo=framer&logoColor=white)](https://www.framer.com/motion/)
+
+**Integrations**
+[![GitHub API](https://img.shields.io/badge/GitHub_API-Webhooks-181717?logo=github&logoColor=white)](https://docs.github.com/rest)
+[![PyGithub](https://img.shields.io/badge/PyGithub-REST_Client-181717?logo=github&logoColor=white)](https://pygithub.readthedocs.io/)
+[![Slack Bolt](https://img.shields.io/badge/Slack_Bolt-Interactive-4A154B?logo=slack&logoColor=white)](https://slack.dev/bolt-python/)
+[![Swagger](https://img.shields.io/badge/Swagger-OpenAPI-85EA2D?logo=swagger&logoColor=black)](https://swagger.io/)
+
+**Infra / DevOps**
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Redis](https://img.shields.io/badge/Redis-Cache-DC382D?logo=redis&logoColor=white)](https://redis.io/)
+[![SQLite](https://img.shields.io/badge/SQLite-DB-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Optional-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Pytest](https://img.shields.io/badge/Pytest-Testing-0A9EDC?logo=pytest&logoColor=white)](https://docs.pytest.org/)
 
 ---
 
