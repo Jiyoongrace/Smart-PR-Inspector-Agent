@@ -31,8 +31,12 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Smart PR Inspector API",
     description="GitHub PR 자동 분석 에이전트 API",
-    version="1.0.0",
+    version="1.2.0",
 )
+
+# RAG 문서 업로드 라우터 등록
+from api.rag_upload import router as rag_upload_router
+app.include_router(rag_upload_router)
 
 # CORS 설정
 app.add_middleware(
@@ -201,41 +205,127 @@ def _get_slack_handler():
 
     @slack_app.action("approve_pr")
     def handle_approve(ack, body, client):
+        """승인 버튼 → GitHub Approve + '~~~ 기능 PR 승인했습니다' 메시지"""
         ack()
-        repo, pr_number = _parse_button_value(body["actions"][0]["value"])
+        value = body["actions"][0]["value"]
+        repo, pr_number, pr_title = _parse_button_value_v2(value)
+        user = body.get("user", {}).get("name", "알 수 없음")
+
         try:
             _github_approve(repo, pr_number)
-            result_text = f"✅ PR #{pr_number} Slack에서 승인 완료"
+            result_blocks = [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": (
+                            f"✅ *{pr_title}* 기능 PR 승인했습니다.\n"
+                            f"승인자: `{user}` | PR #{pr_number}"
+                        ),
+                    },
+                },
+            ]
         except Exception as e:
             logger.error(f"GitHub 승인 실패: {e}")
-            result_text = f"❌ PR #{pr_number} 승인 실패: {e}"
+            result_blocks = [
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"❌ PR #{pr_number} 승인 실패: {e}"},
+                },
+            ]
         client.chat_update(
             channel=body["channel"]["id"],
             ts=body["message"]["ts"],
-            text=result_text,
-            blocks=[],  # 버튼 블록 제거 (완료 상태)
+            text=f"✅ {pr_title} PR 승인 완료",
+            blocks=result_blocks,
         )
 
     @slack_app.action("request_changes")
     def handle_request_changes(ack, body, client):
+        """수정 요청 버튼 → 수정 영역 선택 메뉴 표시"""
         ack()
-        repo, pr_number = _parse_button_value(body["actions"][0]["value"])
-        try:
-            _github_request_changes(repo, pr_number)
-            result_text = f"🔄 PR #{pr_number} GitHub에 수정 요청 완료"
-        except Exception as e:
-            logger.error(f"GitHub 수정 요청 실패: {e}")
-            result_text = f"❌ PR #{pr_number} 수정 요청 실패: {e}"
+        value = body["actions"][0]["value"]
+        repo, pr_number, pr_title = _parse_button_value_v2(value)
+
+        # 수정 영역 선택 메뉴 표시
+        select_blocks = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"🔄 *PR #{pr_number}: {pr_title}*\n어떤 기능의 수정이 필요하신가요?",
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "static_select",
+                        "placeholder": {"type": "plain_text", "text": "수정 영역 선택"},
+                        "action_id": "select_change_area",
+                        "options": [
+                            {"text": {"type": "plain_text", "text": "🔧 코드 로직 수정"}, "value": f"{value}|코드 로직"},
+                            {"text": {"type": "plain_text", "text": "📋 컨벤션 위반 수정"}, "value": f"{value}|컨벤션"},
+                            {"text": {"type": "plain_text", "text": "🧪 테스트 보완"}, "value": f"{value}|테스트"},
+                            {"text": {"type": "plain_text", "text": "📖 문서 업데이트"}, "value": f"{value}|문서"},
+                            {"text": {"type": "plain_text", "text": "🔒 보안 이슈 수정"}, "value": f"{value}|보안"},
+                            {"text": {"type": "plain_text", "text": "🏗️ 아키텍처 개선"}, "value": f"{value}|아키텍처"},
+                        ],
+                    },
+                ],
+            },
+        ]
         client.chat_update(
             channel=body["channel"]["id"],
             ts=body["message"]["ts"],
-            text=result_text,
-            blocks=[],  # 버튼 블록 제거 (완료 상태)
+            text=f"🔄 PR #{pr_number} 수정 영역 선택 중...",
+            blocks=select_blocks,
+        )
+
+    @slack_app.action("select_change_area")
+    def handle_select_change_area(ack, body, client):
+        """수정 영역 선택 → GitHub Request Changes + 확인 메시지"""
+        ack()
+        selected = body["actions"][0]["selected_option"]["value"]
+        # 형식: "repo|pr_number|pr_title|수정영역"
+        parts = selected.split("|")
+        repo, pr_number, pr_title, area = parts[0], int(parts[1]), parts[2], parts[3]
+        user = body.get("user", {}).get("name", "알 수 없음")
+
+        try:
+            _github_request_changes(
+                repo, pr_number,
+                comment=f"🔄 [{area}] 영역의 수정이 요청되었습니다. (요청자: {user})",
+            )
+            result_blocks = [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": (
+                            f"🔄 *{pr_title}* 기능 *[{area}]* 수정 요청하였습니다.\n"
+                            f"요청자: `{user}` | PR #{pr_number}"
+                        ),
+                    },
+                },
+            ]
+        except Exception as e:
+            logger.error(f"GitHub 수정 요청 실패: {e}")
+            result_blocks = [
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"❌ PR #{pr_number} 수정 요청 실패: {e}"},
+                },
+            ]
+        client.chat_update(
+            channel=body["channel"]["id"],
+            ts=body["message"]["ts"],
+            text=f"🔄 {pr_title} [{area}] 수정 요청 완료",
+            blocks=result_blocks,
         )
 
     @slack_app.action("view_pr")
     def handle_view_pr(ack):
-        # URL 버튼 클릭 시 ack만 처리 (브라우저에서 URL로 이동)
         ack()
 
     _slack_bolt_handler = SlackRequestHandler(slack_app)
@@ -243,14 +333,22 @@ def _get_slack_handler():
 
 
 def _parse_button_value(value: str) -> tuple[str, int]:
-    """버튼 value에서 (repo, pr_number) 파싱
-    형식: "owner/repo|pr_number"
-    """
+    """버튼 value에서 (repo, pr_number) 파싱 — 구버전 호환"""
     if "|" in value:
-        repo, pr_num = value.split("|", 1)
-        return repo, int(pr_num)
-    # 구버전 호환: pr_number만 있는 경우
+        parts = value.split("|")
+        return parts[0], int(parts[1])
     return os.getenv("GITHUB_REPO", ""), int(value)
+
+
+def _parse_button_value_v2(value: str) -> tuple[str, int, str]:
+    """버튼 value에서 (repo, pr_number, pr_title) 파싱
+    형식: "owner/repo|pr_number|pr_title"
+    """
+    parts = value.split("|", 2)
+    repo = parts[0] if len(parts) > 0 else ""
+    pr_num = int(parts[1]) if len(parts) > 1 else 0
+    pr_title = parts[2] if len(parts) > 2 else f"PR #{pr_num}"
+    return repo, pr_num, pr_title
 
 
 # ── Slack Interactive Events ──────────────────────────────────────────────
@@ -299,14 +397,15 @@ def _github_approve(repo: str, pr_number: int) -> None:
     )
 
 
-def _github_request_changes(repo: str, pr_number: int) -> None:
+def _github_request_changes(repo: str, pr_number: int, comment: str = "") -> None:
     """GitHub PR REQUEST_CHANGES Review 제출"""
     gh = get_github_client()
     github_repo = gh.get_repo(repo)
     pr = github_repo.get_pull(pr_number)
+    body = comment or "🔄 Slack에서 Smart PR Inspector를 통해 수정 요청되었습니다."
     pr.create_review(
         event="REQUEST_CHANGES",
-        body="🔄 Slack에서 Smart PR Inspector를 통해 수정 요청되었습니다.",
+        body=body,
     )
 
 
@@ -554,7 +653,51 @@ async def rag_search(query: str, n_results: int = 3):
 @app.get("/health")
 async def health():
     """헬스체크"""
-    return {"status": "healthy", "version": "1.0.0"}
+    return {"status": "healthy", "version": "1.2.0"}
+
+
+@app.get("/api/skills")
+async def list_skills():
+    """SKILL.md에서 로드된 스킬 목록 조회"""
+    from config.skills import get_skill_registry
+    registry = get_skill_registry()
+    return {
+        "skills": registry.list_skills(),
+        "workflow": {
+            "entry": registry.workflow.entry,
+            "parallel": registry.workflow.parallel,
+            "sequence": registry.workflow.sequence,
+            "models": registry.workflow.models,
+        },
+        "total": len(registry.skills),
+    }
+
+
+@app.get("/api/skills/{skill_id}")
+async def get_skill_detail(skill_id: str):
+    """특정 스킬 상세 정보 조회"""
+    from config.skills import get_skill_registry
+    from fastapi.responses import JSONResponse
+    registry = get_skill_registry()
+    skill = registry.get_skill(skill_id)
+    if not skill:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"스킬 '{skill_id}'을 찾을 수 없습니다"},
+        )
+    return {
+        "id": skill.id,
+        "name": skill.name,
+        "description": skill.description,
+        "tools": skill.tools,
+        "model": registry.get_model_for_skill(skill_id),
+        "prompt": skill.prompt,
+        "hitl": skill.hitl,
+        "retry": skill.retry,
+        "max_retries": skill.max_retries,
+        "rag": skill.rag,
+        "parallel_group": skill.parallel_group,
+    }
 
 
 # ── 서명 검증 ──────────────────────────────────────────────────────────────
