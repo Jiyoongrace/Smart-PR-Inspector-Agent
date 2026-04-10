@@ -586,32 +586,108 @@ function DocUploadSection({
   );
 }
 
-function RagStats() {
-  const [stats, setStats] = useState<{ domain_docs: number; convention_docs: number } | null>(null);
+interface RagFile { filename: string; chunks: number }
+interface RagStatsData {
+  domain_docs: number;
+  convention_docs: number;
+  domain_files: RagFile[];
+  convention_files: RagFile[];
+}
 
-  useEffect(() => {
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+function RagStats() {
+  const [stats, setStats] = useState<RagStatsData | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+  const loadStats = () => {
     fetch(`${API_BASE}/api/rag/stats`)
       .then((r) => r.json())
       .then(setStats)
       .catch(() => {});
-  }, []);
+  };
+
+  useEffect(() => { loadStats(); }, []);
+
+  const handleDelete = async (collection: string, filename: string) => {
+    if (!confirm(`"${filename}" 문서를 삭제하시겠습니까?`)) return;
+    setDeleting(filename);
+    try {
+      const resp = await fetch(
+        `${API_BASE}/api/rag/documents/${collection}/${encodeURIComponent(filename)}`,
+        { method: "DELETE" }
+      );
+      if (resp.ok) loadStats();
+    } catch { /* ignore */ }
+    setDeleting(null);
+  };
 
   if (!stats) return null;
 
   return (
     <div className="rounded-lg border border-border p-3">
-      <h4 className="text-xs font-semibold mb-2">RAG 인덱스 현황</h4>
-      <div className="flex gap-3 text-[10px]">
-        <div className="flex-1 text-center p-2 rounded bg-muted">
-          <div className="text-lg font-bold text-foreground">{stats.convention_docs}</div>
-          <div className="text-muted-foreground">코딩 가이드</div>
-        </div>
-        <div className="flex-1 text-center p-2 rounded bg-muted">
-          <div className="text-lg font-bold text-foreground">{stats.domain_docs}</div>
-          <div className="text-muted-foreground">비즈니스 룰북</div>
-        </div>
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="text-xs font-semibold">인덱싱된 문서</h4>
+        <button onClick={loadStats} className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground">
+          <RefreshCw className="w-3 h-3" />
+        </button>
       </div>
+
+      {/* 코딩 가이드 문서 목록 */}
+      {stats.convention_files.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[10px] text-muted-foreground font-medium mb-1">
+            📋 코딩 가이드 ({stats.convention_docs}개 청크)
+          </p>
+          {stats.convention_files.map((f) => (
+            <div key={f.filename} className="flex items-center gap-1.5 py-1 px-2 rounded hover:bg-muted/50 group">
+              <span className="text-[10px] text-foreground truncate flex-1">{f.filename}</span>
+              <span className="text-[9px] text-muted-foreground">{f.chunks}청크</span>
+              <button
+                onClick={() => handleDelete("convention", f.filename)}
+                disabled={deleting === f.filename}
+                className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/20 text-red-400 transition-all"
+              >
+                {deleting === f.filename
+                  ? <Loader2 className="w-3 h-3 animate-spin" />
+                  : <XCircle className="w-3 h-3" />
+                }
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 비즈니스 룰북 문서 목록 */}
+      {stats.domain_files.length > 0 && (
+        <div className="mb-2">
+          <p className="text-[10px] text-muted-foreground font-medium mb-1">
+            📖 비즈니스 룰북 ({stats.domain_docs}개 청크)
+          </p>
+          {stats.domain_files.map((f) => (
+            <div key={f.filename} className="flex items-center gap-1.5 py-1 px-2 rounded hover:bg-muted/50 group">
+              <span className="text-[10px] text-foreground truncate flex-1">{f.filename}</span>
+              <span className="text-[9px] text-muted-foreground">{f.chunks}청크</span>
+              <button
+                onClick={() => handleDelete("domain", f.filename)}
+                disabled={deleting === f.filename}
+                className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/20 text-red-400 transition-all"
+              >
+                {deleting === f.filename
+                  ? <Loader2 className="w-3 h-3 animate-spin" />
+                  : <XCircle className="w-3 h-3" />
+                }
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {stats.convention_files.length === 0 && stats.domain_files.length === 0 && (
+        <p className="text-[10px] text-muted-foreground text-center py-3">
+          아직 인덱싱된 문서가 없습니다.<br />위에서 문서를 업로드하세요.
+        </p>
+      )}
     </div>
   );
 }
