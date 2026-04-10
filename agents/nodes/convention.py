@@ -67,17 +67,12 @@ def _ast_check(diff: str, changed_files: List[str]) -> List[ConventionViolation]
     python_blocks = _extract_python_from_diff(diff)
 
     for file_path, code_lines in python_blocks.items():
-        code = "\n".join(code_lines)
+        code = _normalize_indentation("\n".join(code_lines))
         try:
             tree = ast.parse(code)
-        except SyntaxError as e:
-            violations.append(ConventionViolation(
-                file=file_path,
-                line=e.lineno or 0,
-                rule="syntax_error",
-                message=f"구문 오류: {e.msg}",
-                severity="error",
-            ))
+        except SyntaxError:
+            # diff에서 추출한 부분 코드는 파싱 실패할 수 있음 — 무시
+            logger.debug(f"AST 파싱 스킵 (부분 코드): {file_path}")
             continue
 
         violations.extend(_check_naming(tree, file_path))
@@ -85,6 +80,9 @@ def _ast_check(diff: str, changed_files: List[str]) -> List[ConventionViolation]
         violations.extend(_check_magic_numbers(tree, file_path))
         violations.extend(_check_bare_except(tree, file_path))
         violations.extend(_check_function_length(tree, file_path))
+        violations.extend(_check_mutable_defaults(tree, file_path))
+        violations.extend(_check_print_statements(tree, file_path))
+        violations.extend(_check_eval_usage(tree, file_path))
 
     return violations
 
@@ -249,15 +247,21 @@ def _check_function_length(tree: ast.AST, file_path: str) -> List[ConventionViol
 
 
 def _llm_check(diff: str) -> List[ConventionViolation]:
-    """LLM 보조 컨벤션 분석 (복잡한 패턴)"""
+    """LLM + RAG 보조 컨벤션 분석 (팀 컨벤션 문서 활용)"""
     try:
         from config.llm import call_llm
 
         rules = _load_conventions()
+
+        # RAG: 팀 컨벤션 문서에서 관련 규칙 검색
+        rag_context = _search_team_conventions(diff[:500])
+
         prompt = f"""다음 코드 Diff를 분석하여 컨벤션 위반 사항을 JSON 배열로 반환하세요.
 
-컨벤션 규칙:
+컨벤션 규칙 (YAML):
 {yaml.dump(rules, allow_unicode=True)}
+
+{rag_context}
 
 코드 Diff:
 {diff[:4000]}
@@ -291,6 +295,39 @@ def _llm_check(diff: str) -> List[ConventionViolation]:
     return []
 
 
+def _search_team_conventions(diff_snippet: str) -> str:
+    """RAG: 팀 컨벤션 문서에서 관련 규칙 검색 (Hybrid RAG)"""
+    try:
+        from memory.vector_store import VectorStore
+
+        store = VectorStore(collection_name="team_conventions")
+        if store.count() == 0:
+            return ""
+
+        results = store.search(
+            query=diff_snippet,
+            n_results=3,
+            use_reranking=True,
+        )
+
+        if not results:
+            return ""
+
+        docs = [r["content"] for r in results]
+        sources = [r.get("metadata", {}).get("source", "") for r in results]
+
+        context = "팀 컨벤션 문서 (RAG 검색 결과):\n"
+        context += "\n---\n".join(docs[:3])
+        context += f"\n(참조: {', '.join(set(s for s in sources if s))})"
+
+        logger.info(f"팀 컨벤션 RAG 검색: {len(results)}개 문서 활용")
+        return context
+
+    except Exception as e:
+        logger.debug(f"팀 컨벤션 RAG 검색 실패: {e}")
+        return ""
+
+
 def _load_conventions() -> dict:
     """conventions.yaml 룰북 로드"""
     if CONVENTIONS_PATH.exists():
@@ -304,6 +341,81 @@ def _make_summary(violations: List[ConventionViolation]) -> str:
     warnings = sum(1 for v in violations if v.severity == "warning")
     infos = sum(1 for v in violations if v.severity == "info")
     return f"오류 {errors}건, 경고 {warnings}건, 정보 {infos}건"
+
+
+def _check_mutable_defaults(tree: ast.AST, file_path: str) -> List[ConventionViolation]:
+    """함수 기본 인자로 mutable 객체 사용 검사 (매우 흔한 버그 원인)"""
+    violations = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            for default in node.args.defaults + node.args.kw_defaults:
+                if default and isinstance(default, (ast.List, ast.Dict, ast.Set)):
+                    violations.append(ConventionViolation(
+                        file=file_path,
+                        line=node.lineno,
+                        rule="mutable_default_arg",
+                        message=f"함수 `{node.name}`에 mutable 기본 인자(list/dict/set) 사용 → None 기본값 + 내부 초기화 권장",
+                        suggestion=f"def {node.name}(..., items: list | None = None):",
+                        severity="error",
+                    ))
+    return violations
+
+
+def _check_print_statements(tree: ast.AST, file_path: str) -> List[ConventionViolation]:
+    """print() 사용 검사 — logging 모듈 권장"""
+    violations = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "print":
+                violations.append(ConventionViolation(
+                    file=file_path,
+                    line=node.lineno,
+                    rule="no_print",
+                    message="print() 대신 logging 모듈을 사용하세요",
+                    suggestion="logger.info(...) 또는 logger.debug(...)",
+                    severity="warning",
+                ))
+    return violations
+
+
+def _check_eval_usage(tree: ast.AST, file_path: str) -> List[ConventionViolation]:
+    """eval/exec 사용 검사 — 보안 위험"""
+    violations = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id in ("eval", "exec"):
+                violations.append(ConventionViolation(
+                    file=file_path,
+                    line=node.lineno,
+                    rule="no_eval_exec",
+                    message=f"`{func.id}()` 사용 금지 — 코드 인젝션 보안 위험",
+                    severity="error",
+                ))
+    return violations
+
+
+def _normalize_indentation(code: str) -> str:
+    """diff에서 추출한 코드의 들여쓰기를 정규화
+
+    diff의 추가 라인만 모으면 공통 들여쓰기가 있어 AST 파싱이 실패함.
+    모든 라인의 최소 들여쓰기를 제거하여 정규화합니다.
+    """
+    lines = code.split("\n")
+    non_empty = [line for line in lines if line.strip()]
+    if not non_empty:
+        return code
+
+    # 최소 들여쓰기 계산
+    min_indent = min(len(line) - len(line.lstrip()) for line in non_empty)
+    if min_indent == 0:
+        return code
+
+    return "\n".join(
+        line[min_indent:] if len(line) >= min_indent else line
+        for line in lines
+    )
 
 
 def _is_snake_case(name: str) -> bool:
