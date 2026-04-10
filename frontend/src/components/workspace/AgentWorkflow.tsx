@@ -5,6 +5,7 @@ import {
   Download,
   Code2,
   TestTube2,
+  ShieldCheck,
   Play,
   GitFork,
   BookOpen,
@@ -20,6 +21,19 @@ import {
 import { useAppStore } from "@/store";
 import type { NodeStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+// 노드 ID → 탭 매핑 (클릭 시 해당 탭으로 이동)
+const NODE_TAB_MAP: Record<string, string> = {
+  fetch: "overview",
+  convention: "convention",
+  test_gen: "tests",
+  test_run: "tests",
+  impact: "impact",
+  domain_explain: "impact",
+  doc_sync: "docs",
+  comment: "overview",
+  slack: "overview",
+};
 
 const WORKFLOW_NODES = [
   {
@@ -47,22 +61,29 @@ const WORKFLOW_NODES = [
     id: "test_gen",
     label: "테스트 생성",
     icon: TestTube2,
-    description: "Claude AI로 pytest 코드 자동 생성",
+    description: "AI로 pytest 코드 자동 생성",
     color: "from-cyan-600 to-cyan-700",
     branch: "right",
+  },
+  {
+    id: "arch_review",
+    label: "아키텍처 점검",
+    icon: ShieldCheck,
+    description: "아키텍처 룰 위반 탐지 + HITL 승인",
+    color: "from-red-600 to-red-700",
   },
   {
     id: "test_run",
     label: "테스트 실행",
     icon: Play,
-    description: "Docker 격리 환경 pytest 실행 (최대 3회 재시도)",
+    description: "AI 시나리오 평가 (최대 3회 재시도)",
     color: "from-teal-600 to-teal-700",
   },
   {
     id: "impact",
     label: "영향도 분석",
     icon: GitFork,
-    description: "AST 정적 분석으로 의존성 추적",
+    description: "AST 정적 분석 + 비즈니스 임팩트",
     color: "from-orange-600 to-orange-700",
   },
   {
@@ -120,7 +141,7 @@ const STATUS_BG: Record<NodeStatus, string> = {
 };
 
 export function AgentWorkflow() {
-  const { currentAnalysis, isAnalyzing } = useAppStore();
+  const { currentAnalysis, isAnalyzing, setActiveTab } = useAppStore();
   const nodeStatus = currentAnalysis?.node_status;
 
   const getStatus = (nodeId: string): NodeStatus => {
@@ -151,6 +172,8 @@ export function AgentWorkflow() {
 
             const status = getStatus(node.id);
             const NodeIcon = (node as any).icon;
+            const targetTab = NODE_TAB_MAP[node.id];
+            const isClickable = status === "success" || status === "failed";
 
             return (
               <motion.div
@@ -161,10 +184,16 @@ export function AgentWorkflow() {
                 className="w-full"
               >
                 <div
+                  onClick={() => {
+                    if (isClickable && targetTab) {
+                      setActiveTab(targetTab as any);
+                    }
+                  }}
                   className={cn(
                     "flex items-center gap-3 rounded-xl border p-3 transition-all",
                     STATUS_BG[status],
-                    STATUS_RING[status]
+                    STATUS_RING[status],
+                    isClickable && "cursor-pointer hover:ring-1 hover:ring-primary/40 hover:bg-white/5"
                   )}
                 >
                   {/* 아이콘 */}

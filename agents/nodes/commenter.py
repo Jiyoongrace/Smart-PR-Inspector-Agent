@@ -19,8 +19,12 @@ def generate_comment_node(state: AgentState) -> AgentState:
         state.node_status.comment = NodeStatus.SKIPPED
         return state
 
-    # 마크다운 리포트 생성
-    comment_body = _build_comment(state)
+    # PR Health Score 계산
+    from agents.nodes.risk_report import calculate_pr_health_score, generate_health_card_markdown
+    health_score = calculate_pr_health_score(state)
+
+    # 마크다운 리포트 생성 (Health Score 카드 포함)
+    comment_body = _build_comment(state, health_score)
     state.final_comment = comment_body
 
     # GitHub에 코멘트 게시
@@ -39,7 +43,7 @@ def generate_comment_node(state: AgentState) -> AgentState:
     return state
 
 
-def _build_comment(state: AgentState) -> str:
+def _build_comment(state: AgentState, health_score=None) -> str:
     """전체 분석 결과를 Markdown으로 조합"""
     lines = []
 
@@ -48,6 +52,12 @@ def _build_comment(state: AgentState) -> str:
     lines.append("")
     lines.append(f"> PR: **{state.pr_data.title}**  |  작성자: `{state.pr_data.author}`")
     lines.append("")
+
+    # PR Health Score 카드 (특색 기능)
+    if health_score:
+        from agents.nodes.risk_report import generate_health_card_markdown
+        lines.append(generate_health_card_markdown(health_score))
+        lines.append("")
 
     # 전체 요약 배지
     lines.append(_build_summary_badges(state))
@@ -84,7 +94,7 @@ def _build_comment(state: AgentState) -> str:
 
     # 푸터
     lines.append("---")
-    lines.append("*⚡ Powered by [Smart PR Inspector](https://github.com) | Claude AI*")
+    lines.append("*⚡ Powered by [Smart PR Inspector](https://github.com) | AI*")
 
     return "\n".join(lines)
 

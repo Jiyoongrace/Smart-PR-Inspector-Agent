@@ -1,24 +1,33 @@
 # Agent 워크플로우 아키텍처
 
-> 다이어그램 원본: [agent-workflow.svg](./agent-workflow.svg)
+> 다이어그램 이미지: [agent-workflow-diagram.png](./agent-workflow-diagram.png)
 
 ---
 
 ## 전체 흐름 개요
 
-Smart PR Inspector Agent는 **LangGraph StateGraph** 기반의 순차 + 조건부 분기 패턴으로 동작합니다.  
-GitHub PR이 생성되거나 업데이트되면 자동으로 트리거되어, 코드 품질 분석부터 Slack 알림까지 9개 노드를 순서대로 실행합니다.
+Smart PR Inspector Agent는 **LangGraph StateGraph** 기반의 **병렬 처리 + HITL + 조건부 분기** 패턴으로 동작합니다.  
+GitHub PR이 생성되거나 업데이트되면 자동으로 트리거되어, 11개 노드를 실행합니다.
 
 ```
 GitHub PR 이벤트
   → FastAPI Webhook (:8000)
     → [LangGraph StateGraph]
-        fetch → convention → test_gen → test_run
-                                          ├─ retry → fix_test ─┐ (최대 3회)
-                                          └────────────────────←┘
-                                          ↓ (success / fail 모두)
-                              impact → domain_explain → doc_sync
-                                → comment → slack → END
+        fetch → FORK (병렬)
+                 ├── convention (AST + LLM)  [Branch A]
+                 └── test_gen (BDD 시나리오) [Branch B]
+               → JOIN (합류)
+               → arch_review (아키텍처 룰 점검)
+                   ├── 위반 → HITL (시니어 승인 대기)
+                   │           ├── 승인 → test_run
+                   │           └── 반려 → comment (PR 반려) → END
+                   └── 통과 → test_run
+               → test_run
+                   ├── retry → fix_test ─┐ (최대 3회, 빨강 파선)
+                   └────────────────────←┘
+                   ↓ (success / fail 모두)
+               → impact → domain_explain (Hybrid RAG) → doc_sync
+               → comment → slack → END
 ```
 
 ---
@@ -43,15 +52,16 @@ Webhook 서명(HMAC-SHA256)을 검증한 뒤 `AgentState`를 초기화하고 워
 ```python
 class AgentState(BaseModel):
     pr_data: PRData               # PR 번호, 레포, 작성자, 제목
-    diff: str                     # GitHub diff 원문
-    convention_result: dict       # 컨벤션 위반 목록
-    test_result: dict             # 테스트 실행 결과
-    impact: dict                  # 영향받는 모듈 목록
-    domain_explanation: str       # 비즈니스 영향도 요약
-    doc_updates: dict             # Swagger/README 변경 초안
-    slack_thread: str             # Slack 메시지 ID
-    node_status: NodeStatus       # 각 노드 실행 상태
-    retry_count: int              # fix_test 재시도 횟수
+    convention_result: ConventionResult  # 컨벤션 위반 목록
+    test_result: TestResult       # AI 시나리오 검증 결과
+    arch_review: ArchReviewResult # 아키텍처 룰 점검 + HITL 승인 상태
+    impact_analysis: ImpactAnalysis  # 영향도 + 비즈니스 분석
+    domain_explanation: str       # Hybrid RAG 비즈니스 영향도 요약
+    domain_sources: List[str]     # RAG 참조 문서 목록
+    doc_updates: str              # Swagger/README 변경 초안
+    final_comment: str            # GitHub PR 코멘트 마크다운
+    slack_thread_id: str          # Slack 메시지 ID
+    node_status: NodeExecutionStatus  # 각 노드 실행 상태 (arch_review 포함)
     started_at: str
     completed_at: str
 ```
@@ -92,8 +102,8 @@ GitHub API를 통해 PR의 diff, 메타데이터(제목, 작성자, 브랜치), 
 4. `bandit`으로 보안 취약점 스캔
 5. 복잡한 규칙(가독성, 로직 중복)은 Claude에게 위임
 
-> **주의:** 아키텍처 문서에는 `test_gen`과 병렬 실행으로 표기되어 있으나,  
-> 실제 구현에서는 **순차 실행**입니다 (동일 state key 동시 업데이트 오류 방지).
+> **병렬 실행:** `convention`과 `test_gen`은 LangGraph Fork/Join 패턴으로 **동시 실행**됩니다.  
+> `fetch` 노드에서 두 노드로 엣지가 분기되고, 두 노드 모두 완료 후 `arch_review`로 합류합니다.
 
 ---
 
@@ -115,7 +125,43 @@ GitHub API를 통해 PR의 diff, 메타데이터(제목, 작성자, 브랜치), 
 
 ---
 
-### NODE 4 — `test_run` (조건부 분기)
+### NODE 4 — `arch_review` (HITL — 아키텍처 룰 점검)
+
+| 항목 | 내용 |
+|------|------|
+| **함수** | `arch_review_node` |
+| **역할** | 아키텍처 수준의 심각한 위반 탐지 + 시니어 승인 대기 (HITL) |
+| **입력** | `diff`, `changed_files`, `convention_result` |
+| **출력** | `arch_review` (위반 목록, 승인 상태) |
+| **도구** | AST, regex, Slack SDK (알림) |
+
+**점검 항목:**
+- 레이어 위반: API 레이어에서 직접 DB 접근 감지
+- 보안 위반: 하드코딩된 시크릿/API 키 패턴
+- 구조 위반: God Class (public 메서드 10개 이상)
+- 순환 참조: 모듈 간 상호 import 패턴
+
+**HITL 분기 로직:**
+```python
+def check_arch_approval(state: AgentState) -> str:
+    if not state.arch_review.has_violation:
+        return "approved"    # → test_run으로 자동 진행
+    if state.arch_review.approval_status == "rejected":
+        return "rejected"    # → comment로 (PR 반려 코멘트)
+    return "approved"        # 승인 or 데모 모드 자동 승인
+```
+
+| 결과 | 다음 노드 | 설명 |
+|------|-----------|------|
+| `approved` | `test_run` | 위반 없음 또는 시니어 승인 → 테스트 진행 |
+| `rejected` | `comment` | 시니어 반려 → PR 즉시 반려 코멘트 작성 → END |
+
+> **왜 필요한가:** AI가 모든 것을 결정하게 두지 않고, 시스템에 중요한 아키텍처 Rule  
+> 의사결정(Merge Block)은 반드시 책임 있는 인간(개발자)의 통제와 승인 하에 두기 위함입니다.
+
+---
+
+### NODE 5 — `test_run` (조건부 분기)
 
 | 항목 | 내용 |
 |------|------|
@@ -164,43 +210,65 @@ def should_retry(state: AgentState) -> str:
 
 ---
 
-### NODE 5 — `impact`
+### NODE 6 — `impact`
 
 | 항목 | 내용 |
 |------|------|
 | **함수** | `impact_analysis_node` |
-| **역할** | 변경된 함수가 어떤 모듈/함수에서 호출되는지 정적 분석 |
-| **입력** | `diff` |
-| **출력** | `impact` (영향 모듈 리스트, 호출 체인, API 변경 여부) |
-| **도구** | `ast`, 내장 DFS/BFS |
+| **역할** | 변경된 함수가 어떤 모듈/함수에서 호출되는지 정적 분석 + 비즈니스 임팩트 LLM 분석 |
+| **입력** | `diff`, `pr_data` |
+| **출력** | `impact` (영향 모듈 리스트, 호출 체인, API 변경 여부, **비즈니스 영향도**) |
+| **도구** | `ast`, 내장 DFS/BFS, **Anthropic Claude (비즈니스 분석)** |
 
 **동작 방식:**
 1. `ast` 모듈로 전체 프로젝트를 파싱하여 호출 그래프 생성
 2. 변경된 함수를 시작점으로 DFS/BFS 탐색
 3. 영향받는 파일·함수 목록과 호출 체인 반환
 4. `@app.post()` 등 API 데코레이터 감지 → Swagger 업데이트 필요 여부 플래그
+5. **비즈니스 영향도 LLM 분석** (신규):
+   - 코드 변경의 비즈니스 관점 요약 생성
+   - 영향받는 사용자 기능 목록 도출
+   - 장애 시 비즈니스 리스크 평가
+   - 시니어 엔지니어 관점의 배포 전 체크리스트 생성
+   - LLM 호출 실패 시 graceful skip (코드 분석 결과는 유지)
 
 ---
 
-### NODE 6 — `domain_explain` (RAG)
+### NODE 7 — `domain_explain` (Hybrid RAG)
 
 | 항목 | 내용 |
 |------|------|
 | **함수** | `domain_explainer_node` |
-| **역할** | 내부 도메인 문서를 검색해 비즈니스 영향도 설명 |
+| **역할** | Hybrid RAG로 도메인 문서 검색 후 비즈니스 영향도 설명 |
 | **입력** | `diff`, `impact` |
-| **출력** | `domain_explanation` (300자 이내 비즈니스 요약) |
-| **도구** | ChromaDB (벡터 DB), Anthropic Claude, LangChain RAG |
+| **출력** | `domain_explanation` (200자 이내 비즈니스 요약), `domain_sources` |
+| **도구** | ChromaDB, BM25 (rank-bm25), Cross-Encoder (sentence-transformers), LLM |
 
-**RAG 파이프라인:**
-1. Notion/Confluence 문서를 ChromaDB에 임베딩하여 사전 저장
-2. 변경 함수명 + 주변 코드를 쿼리로 유사 문서 검색
-3. 검색 결과 + diff를 Claude에게 전달
-4. "이 변경이 비즈니스적으로 어떤 의미인지" 300자 요약 생성
+**Hybrid RAG 파이프라인:**
+```
+쿼리 (PR title + diff snippet)
+  │
+  ├── Dense Path: ChromaDB 벡터 검색 → Top-20 (의미적 유사도)
+  │
+  ├── Sparse Path: BM25 키워드 검색 → Top-20 (정확 매칭)
+  │
+  └── RRF (Reciprocal Rank Fusion) → Top-30 통합
+      │
+      └── Cross-Encoder Re-ranking (ms-marco-MiniLM) → Top-5 최종
+          │
+          └── LLM 컨텍스트로 전달 → 비즈니스 영향도 설명 생성
+```
+
+**왜 Hybrid인가:**
+- Dense만: 의미 이해는 좋지만 함수명 정확 검색에 약함
+- Sparse만: 키워드 매칭은 좋지만 의미적 유사도에 약함
+- Hybrid: 둘을 RRF로 통합하여 보완적 효과
+
+**폴백:** Hybrid RAG 실패 시 기존 Dense 검색으로 자동 폴백
 
 ---
 
-### NODE 7 — `doc_sync`
+### NODE 8 — `doc_sync`
 
 | 항목 | 내용 |
 |------|------|
@@ -218,7 +286,7 @@ def should_retry(state: AgentState) -> str:
 
 ---
 
-### NODE 8 — `comment`
+### NODE 9 — `comment`
 
 | 항목 | 내용 |
 |------|------|
@@ -233,7 +301,7 @@ def should_retry(state: AgentState) -> str:
 
 ---
 
-### NODE 9 — `slack`
+### NODE 10 — `slack`
 
 | 항목 | 내용 |
 |------|------|
@@ -253,10 +321,11 @@ Slack에서 직접 PR 리뷰 액션을 처리할 수 있습니다.
 각 노드 완료 시 **SSE(Server-Sent Events)** 로 프론트엔드에 이벤트를 전송합니다.
 
 ```
-type: "start"        → 워크플로우 시작
-type: "node_complete" → 노드 완료 (node 이름 + AgentState 포함)
-type: "complete"     → 전체 완료 (최종 state 포함, SQLite DB 저장)
-type: "error"        → 오류 발생
+type: "start"         → 워크플로우 시작
+type: "node_complete"  → 노드 완료 (node 이름 + AgentState 포함)
+type: "hitl_pending"   → HITL 승인 대기 (violations 목록 + 승인 상태)
+type: "complete"      → 전체 완료 (최종 state 포함, DB 저장)
+type: "error"         → 오류 발생
 ```
 
 Next.js 프론트엔드는 `EventSource`로 이를 구독하여 노드 진행 상태를 실시간으로 시각화합니다.
@@ -286,9 +355,12 @@ Next.js 프론트엔드는 `EventSource`로 이를 구독하여 노드 진행 �
 | `agents/nodes/fetcher.py` | fetch 노드 |
 | `agents/nodes/convention.py` | convention 노드 |
 | `agents/nodes/test_gen.py` | test_gen 노드 |
+| `agents/nodes/arch_review.py` | arch_review 노드 (HITL 아키텍처 점검) |
 | `agents/nodes/test_runner.py` | test_run / fix_test 노드 + should_retry |
 | `agents/nodes/impact.py` | impact 노드 |
-| `agents/nodes/domain_explainer.py` | domain_explain 노드 |
+| `agents/nodes/domain_explainer.py` | domain_explain 노드 (Hybrid RAG) |
+| `agents/nodes/risk_report.py` | PR Health Score 계산 + 리포트 카드 |
+| `api/rag_upload.py` | 팀 문서 업로드 → RAG 인덱싱 API |
 | `agents/nodes/doc_sync.py` | doc_sync 노드 |
 | `agents/nodes/commenter.py` | comment 노드 |
 | `agents/nodes/slack_notify.py` | slack 노드 |

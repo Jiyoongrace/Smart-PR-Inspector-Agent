@@ -1,11 +1,12 @@
 """
 RAG 기반 도메인 설명 노드
-ChromaDB 벡터 검색 + Claude LLM으로 비즈니스 영향도 설명
+Hybrid RAG (Dense + Sparse BM25) + Cross-Encoder Re-ranking으로
+비즈니스 영향도 설명 생성
 """
 
 import logging
 import os
-from typing import List
+from typing import List, Tuple
 
 from agents.state import AgentState, NodeStatus
 
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def domain_explainer_node(state: AgentState) -> AgentState:
-    """도메인 문서 검색 후 비즈니스 영향도 설명 생성"""
+    """Hybrid RAG 도메인 문서 검색 후 비즈니스 영향도 설명 생성"""
     state.node_status.domain_explain = NodeStatus.RUNNING
 
     if not state.pr_data:
@@ -21,8 +22,8 @@ def domain_explainer_node(state: AgentState) -> AgentState:
         return state
 
     try:
-        # ChromaDB에서 관련 문서 검색
-        docs, sources = _search_domain_docs(
+        # Hybrid RAG 검색 (Dense + Sparse + Re-ranking)
+        docs, sources = _hybrid_search_domain_docs(
             query=f"{state.pr_data.title}\n{state.pr_data.diff[:300]}"
         )
 
@@ -37,10 +38,9 @@ def domain_explainer_node(state: AgentState) -> AgentState:
         state.domain_sources = sources
 
         state.node_status.domain_explain = NodeStatus.SUCCESS
-        logger.info(f"도메인 설명 생성 완료 ({len(docs)}개 문서 참조)")
+        logger.info(f"도메인 설명 생성 완료 ({len(docs)}개 문서 참조, Hybrid RAG)")
 
     except Exception as e:
-        # RAG 실패는 치명적이지 않으므로 경고만
         logger.warning(f"도메인 설명 생성 실패 (스킵): {e}")
         state.domain_explanation = None
         state.domain_sources = []
@@ -49,8 +49,53 @@ def domain_explainer_node(state: AgentState) -> AgentState:
     return state
 
 
-def _search_domain_docs(query: str) -> tuple[List[str], List[str]]:
-    """ChromaDB에서 관련 도메인 문서 벡터 검색"""
+def _hybrid_search_domain_docs(query: str) -> Tuple[List[str], List[str]]:
+    """
+    Hybrid RAG 검색 파이프라인:
+    1. Dense (ChromaDB 벡터 검색) — 의미적 유사도
+    2. Sparse (BM25 키워드 검색) — 정확한 용어 매칭
+    3. RRF (Reciprocal Rank Fusion) — 결과 통합
+    4. Cross-Encoder Re-ranking — 최종 정밀 정렬
+    """
+    try:
+        from memory.vector_store import get_vector_store
+
+        store = get_vector_store()
+
+        if store.count() == 0:
+            logger.info("도메인 문서 DB가 비어있음 — 벡터 검색 스킵")
+            return [], []
+
+        # Hybrid 검색 (Dense + Sparse → RRF → Re-ranking)
+        results = store.search(
+            query=query,
+            n_results=5,
+            use_reranking=True,
+        )
+
+        docs = [r["content"] for r in results]
+        sources = [
+            r["metadata"].get("source", "알 수 없음")
+            for r in results
+            if r.get("metadata")
+        ]
+
+        # 중복 소스 제거
+        sources = list(dict.fromkeys(sources))
+
+        logger.info(
+            f"Hybrid RAG 검색: {len(results)}개 문서 반환 "
+            f"(Re-ranking 적용)"
+        )
+        return docs, sources
+
+    except Exception as e:
+        logger.debug(f"Hybrid RAG 검색 실패, Dense-only 폴백: {e}")
+        return _fallback_dense_search(query)
+
+
+def _fallback_dense_search(query: str) -> Tuple[List[str], List[str]]:
+    """Hybrid 실패 시 기존 Dense 검색으로 폴백"""
     try:
         import chromadb
         from chromadb.utils import embedding_functions
@@ -59,17 +104,13 @@ def _search_domain_docs(query: str) -> tuple[List[str], List[str]]:
             host=os.getenv("CHROMA_HOST", "localhost"),
             port=int(os.getenv("CHROMA_PORT", "8001")),
         )
-
-        # 임베딩 함수 (Anthropic embeddings 또는 기본 사용)
         ef = embedding_functions.DefaultEmbeddingFunction()
-
         collection = client.get_or_create_collection(
             name="domain_docs",
             embedding_function=ef,
         )
 
         if collection.count() == 0:
-            logger.info("도메인 문서 DB가 비어있음 - 벡터 검색 스킵")
             return [], []
 
         results = collection.query(
@@ -79,17 +120,16 @@ def _search_domain_docs(query: str) -> tuple[List[str], List[str]]:
 
         docs = results["documents"][0] if results["documents"] else []
         sources = []
-
         if results.get("metadatas") and results["metadatas"][0]:
             sources = [
-                meta.get("source", meta.get("title", "알 수 없음"))
+                meta.get("source", "알 수 없음")
                 for meta in results["metadatas"][0]
             ]
 
         return docs, sources
 
     except Exception as e:
-        logger.debug(f"ChromaDB 연결 실패: {e}")
+        logger.debug(f"Dense 폴백도 실패: {e}")
         return [], []
 
 
@@ -98,12 +138,12 @@ def _generate_explanation(
     diff_snippet: str,
     domain_docs: List[str],
 ) -> str:
-    """OpenAI로 비즈니스 영향도 설명 생성"""
+    """LLM으로 비즈니스 영향도 설명 생성"""
     from config.llm import call_llm
 
     domain_context = ""
     if domain_docs:
-        domain_context = "\n\n관련 도메인 문서:\n" + "\n---\n".join(domain_docs[:3])
+        domain_context = "\n\n관련 도메인 문서:\n" + "\n---\n".join(domain_docs[:5])
 
     prompt = f"""다음 코드 변경이 비즈니스적으로 어떤 의미인지 200자 이내로 한국어로 설명하세요.
 기술적 설명보다 비즈니스/사용자 관점에서 설명하고, 주의사항이 있다면 언급하세요.
@@ -125,65 +165,25 @@ PR 제목: {pr_title}
 
 class DomainDocIngester:
     """
-    도메인 문서를 ChromaDB에 인덱싱하는 유틸리티
-    사용법: DomainDocIngester().ingest_markdown_dir("./docs")
+    도메인 문서를 Hybrid RAG 인덱스에 인덱싱하는 유틸리티
+    Dense (ChromaDB) + Sparse (BM25) 동시 인덱싱
+    사용법: DomainDocIngester().ingest_markdown_dir("./docs/domain")
     """
 
     def __init__(self):
-        import chromadb
-        from chromadb.utils import embedding_functions
-
-        self.client = chromadb.HttpClient(
-            host=os.getenv("CHROMA_HOST", "localhost"),
-            port=int(os.getenv("CHROMA_PORT", "8001")),
-        )
-        self.ef = embedding_functions.DefaultEmbeddingFunction()
-        self.collection = self.client.get_or_create_collection(
-            name="domain_docs",
-            embedding_function=self.ef,
-        )
+        from memory.vector_store import get_vector_store
+        self._store = get_vector_store()
 
     def ingest_markdown_dir(self, dir_path: str) -> int:
-        """디렉토리 내 모든 Markdown 파일 인덱싱"""
-        from pathlib import Path
-
-        docs_dir = Path(dir_path)
-        count = 0
-
-        for md_file in docs_dir.rglob("*.md"):
-            with open(md_file, "r", encoding="utf-8") as f:
-                content = f.read()
-
-            # 청크 분할 (최대 1000자)
-            chunks = _chunk_text(content, chunk_size=1000)
-
-            for i, chunk in enumerate(chunks):
-                self.collection.add(
-                    documents=[chunk],
-                    metadatas=[{"source": str(md_file), "chunk": i}],
-                    ids=[f"{md_file.stem}_{i}"],
-                )
-                count += 1
-
-        logger.info(f"{count}개 청크 인덱싱 완료")
+        """디렉토리 내 모든 Markdown 파일 Hybrid 인덱싱"""
+        count = self._store.ingest_directory(dir_path)
+        logger.info(f"{count}개 청크 Hybrid 인덱싱 완료 (Dense + Sparse)")
         return count
 
     def ingest_text(self, text: str, source: str = "manual") -> None:
         """단일 텍스트 인덱싱"""
+        from memory.vector_store import _chunk_text
         chunks = _chunk_text(text)
-        for i, chunk in enumerate(chunks):
-            self.collection.add(
-                documents=[chunk],
-                metadatas=[{"source": source, "chunk": i}],
-                ids=[f"{source}_{i}"],
-            )
-
-
-def _chunk_text(text: str, chunk_size: int = 1000) -> List[str]:
-    """텍스트를 청크로 분할"""
-    chunks = []
-    for i in range(0, len(text), chunk_size):
-        chunk = text[i:i + chunk_size].strip()
-        if chunk:
-            chunks.append(chunk)
-    return chunks
+        ids = [f"{source}_{i}" for i in range(len(chunks))]
+        metas = [{"source": source, "chunk": i} for i in range(len(chunks))]
+        self._store.add_documents(chunks, metas, ids)

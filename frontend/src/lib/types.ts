@@ -8,6 +8,7 @@ export interface NodeExecutionStatus {
   fetch: NodeStatus;
   convention: NodeStatus;
   test_gen: NodeStatus;
+  arch_review: NodeStatus;
   test_run: NodeStatus;
   impact: NodeStatus;
   domain_explain: NodeStatus;
@@ -64,6 +65,14 @@ export interface TestResult {
   verification_mode: "ai_scenario" | "code";
 }
 
+export interface BusinessImpact {
+  summary: string;
+  affected_features: string[];
+  user_facing_changes: string;
+  risk_description: string;
+  recommendations: string[];
+}
+
 export interface ImpactAnalysis {
   changed_functions: string[];
   affected_modules: Array<{
@@ -75,6 +84,7 @@ export interface ImpactAnalysis {
   has_api_changes: boolean;
   call_chain: string[];
   risk_level: RiskLevel;
+  business_impact?: BusinessImpact;
 }
 
 export interface PRData {
@@ -96,6 +106,7 @@ export interface AgentState {
   pr_data: PRData | null;
   convention_result: ConventionResult | null;
   test_result: TestResult | null;
+  pending_scenarios: unknown[];
   impact_analysis: ImpactAnalysis | null;
   domain_explanation: string | null;
   domain_sources: string[];
@@ -113,6 +124,7 @@ export interface AgentState {
 export type SSEEvent =
   | { type: "start"; pr_number: number; repo: string; timestamp: string }
   | { type: "node_complete"; node: string; status: NodeExecutionStatus; timestamp: string }
+  | { type: "hitl_pending"; node: string; status: NodeExecutionStatus; violations: string[]; timestamp: string }
   | { type: "complete"; state: AgentState; timestamp: string }
   | { type: "error"; message: string; timestamp: string }
   | { type: "done" };

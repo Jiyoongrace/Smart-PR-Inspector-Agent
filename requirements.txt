@@ -15,6 +15,10 @@ unidiff==0.7.5
 # Vector DB
 chromadb==0.5.18
 
+# Hybrid RAG (Dense + Sparse + Re-ranking)
+rank-bm25==0.2.2
+sentence-transformers==3.3.1
+
 # API Server
 fastapi==0.115.5
 uvicorn[standard]==0.32.0

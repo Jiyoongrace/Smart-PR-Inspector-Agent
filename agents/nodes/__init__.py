@@ -4,6 +4,7 @@ from agents.nodes.fetcher import fetch_pr_data_node
 from agents.nodes.convention import convention_check_node
 from agents.nodes.test_gen import test_generator_node
 from agents.nodes.test_runner import test_runner_node, fix_test_code_node, should_retry
+from agents.nodes.arch_review import arch_review_node, check_arch_approval
 from agents.nodes.impact import impact_analysis_node
 from agents.nodes.domain_explainer import domain_explainer_node
 from agents.nodes.doc_sync import doc_sync_check_node
@@ -17,6 +18,8 @@ __all__ = [
     "test_runner_node",
     "fix_test_code_node",
     "should_retry",
+    "arch_review_node",
+    "check_arch_approval",
     "impact_analysis_node",
     "domain_explainer_node",
     "doc_sync_check_node",

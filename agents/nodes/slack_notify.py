@@ -34,13 +34,13 @@ def slack_notify_node(state: AgentState) -> AgentState:
     text = f"🤖 PR #{state.pr_data.pr_number} 분석 완료: {state.pr_data.title}"
 
     try:
-        if webhook_url:
-            # ── 방법 A: Incoming Webhook (채널 멤버십 불필요) ──────────────
-            thread_ts = _send_via_webhook(webhook_url, text, blocks)
-        else:
-            # ── 방법 B: Bot Token (채널에 봇이 초대된 경우) ────────────────
+        if bot_token:
+            # ── 방법 A: Bot Token (인터랙티브 버튼 처리 가능) ────────────
             channel = os.getenv("SLACK_CHANNEL", "#pull-requests")
             thread_ts = _send_via_bot(bot_token, channel, text, blocks)
+        elif webhook_url:
+            # ── 방법 B: Incoming Webhook (버튼 클릭 불가) ────────────────
+            thread_ts = _send_via_webhook(webhook_url, text, blocks)
 
         state.slack_thread_id = thread_ts or "sent"
         state.node_status.slack = NodeStatus.SUCCESS
@@ -198,12 +198,18 @@ def _build_blocks(state: AgentState) -> List[dict]:
             },
         })
 
+    # PR Health Score 카드 (특색 기능)
+    try:
+        from agents.nodes.risk_report import calculate_pr_health_score, generate_health_card_slack
+        health_score = calculate_pr_health_score(state)
+        blocks.append(generate_health_card_slack(health_score))
+    except Exception:
+        pass
+
     blocks.append({"type": "divider"})
 
-    # 인터랙티브 버튼 — value 형식: "repo|pr_number"
-    # Incoming Webhook 방식에서도 버튼이 보이지만,
-    # 클릭 이벤트는 Bot Token + /slack/events 엔드포인트에서만 처리됨
-    btn_value = f"{pr.repo}|{pr.pr_number}"
+    # 인터랙티브 버튼 — value 형식: "repo|pr_number|pr_title"
+    btn_value = f"{pr.repo}|{pr.pr_number}|{pr.title}"
     blocks.append({
         "type": "actions",
         "elements": [
@@ -226,12 +232,6 @@ def _build_blocks(state: AgentState) -> List[dict]:
                 "style": "danger",
                 "action_id": "request_changes",
                 "value": btn_value,
-                "confirm": {
-                    "title": {"type": "plain_text", "text": "수정 요청"},
-                    "text": {"type": "plain_text", "text": f"PR #{pr.pr_number}에 수정을 요청하시겠습니까?"},
-                    "confirm": {"type": "plain_text", "text": "수정 요청"},
-                    "deny": {"type": "plain_text", "text": "취소"},
-                },
             },
             {
                 "type": "button",

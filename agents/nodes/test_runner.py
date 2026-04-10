@@ -34,7 +34,7 @@ def test_runner_node(state: AgentState) -> AgentState:
     state.node_status.test_run = NodeStatus.RUNNING
 
     # 시나리오가 없으면 스킵
-    pending: List[TestScenario] = getattr(state, "_pending_scenarios", [])
+    pending: List[TestScenario] = state.pending_scenarios
     if not pending or not state.pr_data:
         state.node_status.test_run = NodeStatus.SKIPPED
         return state

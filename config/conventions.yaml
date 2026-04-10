@@ -1,13 +1,16 @@
-# 팀 코딩 컨벤션 룰북
+# 팀 코딩 컨벤션 룰북 (2024-2026 트렌드 반영)
 # Smart PR Inspector Agent가 참조하는 규칙 정의
+# 참고: PEP 8, Google Python Style Guide, Ruff 기본 규칙셋
+
+# ── 네이밍 ───────────────────────────────────────────────────────────────
 
 naming:
-  description: "네이밍 컨벤션"
+  description: "네이밍 컨벤션 (PEP 8 + Google Style)"
   rules:
     - id: snake_case_functions
-      description: "함수명은 snake_case를 사용한다"
-      example_bad: "def getData()"
-      example_good: "def get_data()"
+      description: "함수명과 변수명은 snake_case를 사용한다"
+      example_bad: "def getData() / userName = ''"
+      example_good: "def get_data() / user_name = ''"
       severity: warning
 
     - id: pascal_case_classes
@@ -17,19 +20,27 @@ naming:
       severity: warning
 
     - id: upper_case_constants
-      description: "상수는 UPPER_SNAKE_CASE를 사용한다"
+      description: "모듈 수준 상수는 UPPER_SNAKE_CASE를 사용한다"
       example_bad: "max_retry = 3"
       example_good: "MAX_RETRY = 3"
       severity: info
 
-    - id: no_abbreviations
-      description: "의미 없는 약어를 지양한다"
-      example_bad: "def calc_disc_prc()"
-      example_good: "def calculate_discount_price()"
+    - id: descriptive_names
+      description: "의미 없는 약어나 한 글자 변수명을 지양한다 (루프 변수 i/j/k 제외)"
+      example_bad: "def calc_disc_prc(d, q)"
+      example_good: "def calculate_discount_price(discount_rate, quantity)"
       severity: info
 
+    - id: boolean_naming
+      description: "boolean 변수/함수는 is_, has_, can_, should_ 접두어를 사용한다"
+      example_bad: "active = True / def check_valid()"
+      example_good: "is_active = True / def is_valid()"
+      severity: info
+
+# ── 타입 힌트 ────────────────────────────────────────────────────────────
+
 type_hints:
-  description: "타입 힌트 규칙"
+  description: "타입 힌트 (PEP 484/604, Python 3.10+ 모던 스타일)"
   rules:
     - id: require_param_hints
       description: "함수 파라미터에 타입 힌트를 반드시 작성한다"
@@ -39,19 +50,33 @@ type_hints:
       description: "함수 반환 타입 힌트를 작성한다 (None 포함)"
       severity: info
 
+    - id: modern_type_syntax
+      description: "Python 3.10+ 유니온 타입은 X | None을 사용한다 (Optional 대신)"
+      example_bad: "Optional[str], Union[int, str]"
+      example_good: "str | None, int | str"
+      severity: info
+
+    - id: use_builtin_generics
+      description: "Python 3.9+ 내장 제네릭을 사용한다 (typing 모듈 대신)"
+      example_bad: "from typing import List, Dict, Tuple"
+      example_good: "list[str], dict[str, int], tuple[int, ...]"
+      severity: info
+
+# ── 에러 처리 ────────────────────────────────────────────────────────────
+
 error_handling:
-  description: "에러 처리 규칙"
+  description: "에러 처리 (견고한 예외 관리)"
   rules:
     - id: no_bare_except
-      description: "bare except: 사용 금지 - 구체적인 예외 클래스 지정"
+      description: "bare except: 사용 금지 — 구체적인 예외 클래스 지정"
       example_bad: "except:"
       example_good: "except ValueError as e:"
       severity: error
 
     - id: no_silent_exception
-      description: "예외를 무시(pass)하지 않는다"
+      description: "예외를 무시(pass)하지 않는다 — 최소한 로깅"
       example_bad: "except Exception: pass"
-      example_good: "except Exception as e: logger.error(e)"
+      example_good: "except Exception as e: logger.warning(f'무시된 예외: {e}')"
       severity: warning
 
     - id: use_specific_exceptions
@@ -60,17 +85,25 @@ error_handling:
       example_good: "raise ValueError('잘못된 입력값')"
       severity: warning
 
+    - id: no_exception_in_loop
+      description: "반복문 내부에서 broad exception catch를 하지 않는다"
+      example_bad: "for x in items: try: ... except Exception: continue"
+      example_good: "실패 항목을 별도 리스트로 수집 후 일괄 처리"
+      severity: warning
+
+# ── 코드 품질 ────────────────────────────────────────────────────────────
+
 code_quality:
-  description: "코드 품질 규칙"
+  description: "코드 품질 (가독성 + 유지보수성)"
   rules:
     - id: no_magic_numbers
-      description: "매직 넘버는 상수로 분리한다"
-      example_bad: "if retry_count >= 3:"
-      example_good: "if retry_count >= MAX_RETRY:"
+      description: "매직 넘버/문자열은 명명된 상수로 분리한다"
+      example_bad: "if retry_count >= 3: / if status == 'active':"
+      example_good: "if retry_count >= MAX_RETRY: / if status == Status.ACTIVE:"
       severity: info
 
     - id: max_function_length
-      description: "함수는 50줄을 넘기지 않는다"
+      description: "함수는 50줄을 넘기지 않는다 — 단일 책임 원칙"
       threshold: 50
       severity: warning
 
@@ -78,6 +111,11 @@ code_quality:
       description: "순환 복잡도는 10 이하로 유지한다"
       threshold: 10
       severity: warning
+
+    - id: max_function_params
+      description: "함수 파라미터는 5개 이하로 제한한다 — 초과 시 dataclass/dict 사용"
+      threshold: 5
+      severity: info
 
     - id: no_print_statements
       description: "print() 대신 logging 모듈을 사용한다"
@@ -87,29 +125,113 @@ code_quality:
       description: "public 함수와 클래스에는 docstring을 작성한다"
       severity: info
 
+    - id: no_nested_functions_deep
+      description: "함수 내 중첩 깊이를 3단계 이하로 유지한다 (early return 활용)"
+      example_bad: "if a: if b: if c: if d: ..."
+      example_good: "if not a: return / if not b: return / ..."
+      severity: warning
+
+    - id: prefer_dataclass
+      description: "데이터 전달용 클래스는 dataclass 또는 Pydantic BaseModel을 사용한다"
+      example_bad: "class Config: def __init__(self, a, b, c): self.a = a; ..."
+      example_good: "@dataclass class Config: a: str; b: int; c: float"
+      severity: info
+
+    - id: no_mutable_default_args
+      description: "함수 기본 인자로 mutable 객체(list, dict)를 사용하지 않는다"
+      example_bad: "def process(items=[])"
+      example_good: "def process(items: list | None = None)"
+      severity: error
+
+# ── 보안 ─────────────────────────────────────────────────────────────────
+
 security:
-  description: "보안 규칙"
+  description: "보안 규칙 (OWASP Top 10 반영)"
   rules:
     - id: no_hardcoded_secrets
-      description: "시크릿/패스워드를 코드에 하드코딩하지 않는다"
-      patterns: ["password", "secret", "api_key", "token"]
+      description: "시크릿/패스워드/API 키를 코드에 하드코딩하지 않는다"
+      patterns: ["password", "secret", "api_key", "token", "private_key"]
       severity: error
 
     - id: sql_injection
-      description: "SQL 쿼리는 파라미터화하여 작성한다"
+      description: "SQL 쿼리는 반드시 파라미터화(parameterized query)하여 작성한다"
+      example_bad: "f'SELECT * FROM users WHERE id = {user_id}'"
+      example_good: "cursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))"
       severity: error
 
-    - id: no_eval
-      description: "eval() 사용을 금지한다"
+    - id: no_eval_exec
+      description: "eval(), exec() 사용을 금지한다 — 코드 인젝션 위험"
       severity: error
+
+    - id: no_pickle_untrusted
+      description: "신뢰할 수 없는 데이터에 pickle.loads()를 사용하지 않는다"
+      severity: error
+
+    - id: validate_input
+      description: "외부 입력(API 파라미터, 파일 업로드)은 반드시 검증한다"
+      example_bad: "filename = request.args['file']; open(filename)"
+      example_good: "filename = secure_filename(request.args['file'])"
+      severity: warning
+
+    - id: no_debug_in_production
+      description: "DEBUG=True, debug 로그, pdb 등 디버그 코드를 프로덕션에 남기지 않는다"
+      severity: warning
+
+# ── 임포트 ───────────────────────────────────────────────────────────────
 
 imports:
-  description: "임포트 규칙"
+  description: "임포트 규칙 (isort/Ruff 호환)"
   rules:
     - id: no_wildcard_imports
       description: "와일드카드 임포트(from x import *) 금지"
       severity: warning
 
-    - id: stdlib_first
-      description: "임포트 순서: 표준 라이브러리 → 서드파티 → 내부 모듈"
+    - id: import_order
+      description: "임포트 순서: 표준 라이브러리 → 서드파티 → 내부 모듈 (isort 기본)"
+      severity: info
+
+    - id: no_unused_imports
+      description: "사용하지 않는 임포트를 제거한다"
+      severity: warning
+
+    - id: no_circular_imports
+      description: "순환 임포트를 방지한다 — TYPE_CHECKING 블록 활용"
+      example_bad: "# a.py에서 b를 import, b.py에서 a를 import"
+      example_good: "from __future__ import annotations / if TYPE_CHECKING: from b import ..."
+      severity: error
+
+# ── 비동기 ───────────────────────────────────────────────────────────────
+
+async_patterns:
+  description: "비동기 패턴 (async/await 모범 사례)"
+  rules:
+    - id: no_sync_in_async
+      description: "async 함수 내에서 동기 블로킹 호출(requests, time.sleep)을 하지 않는다"
+      example_bad: "async def fetch(): response = requests.get(url)"
+      example_good: "async def fetch(): response = await httpx.AsyncClient().get(url)"
+      severity: warning
+
+    - id: use_async_context_manager
+      description: "async 리소스는 async with로 관리한다"
+      example_bad: "client = httpx.AsyncClient(); resp = await client.get(...)"
+      example_good: "async with httpx.AsyncClient() as client: resp = await client.get(...)"
+      severity: info
+
+# ── 테스트 ───────────────────────────────────────────────────────────────
+
+testing:
+  description: "테스트 코드 규칙"
+  rules:
+    - id: test_naming
+      description: "테스트 함수명은 test_대상_상황_기대결과 패턴을 따른다"
+      example_bad: "def test_1()"
+      example_good: "def test_calculate_discount_negative_price_raises_error()"
+      severity: info
+
+    - id: no_hardcoded_test_data
+      description: "테스트 데이터는 fixture 또는 factory로 관리한다"
+      severity: info
+
+    - id: single_assert_per_test
+      description: "하나의 테스트에는 하나의 논리적 검증만 수행한다 (가능한 경우)"
       severity: info

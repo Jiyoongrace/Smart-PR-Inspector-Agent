@@ -261,8 +261,27 @@ export function Sidebar() {
       {navItem === "create" && <CreatePRPanel />}
 
       {navItem === "settings" && (
-        <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">
-          설정 (준비 중)
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="p-3 border-b border-border">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+              RAG 문서 관리
+            </span>
+          </div>
+          <div className="p-3 space-y-4 overflow-y-auto flex-1">
+            <DocUploadSection
+              title="팀 코딩 가이드"
+              description="팀 컨벤션 규칙 문서를 업로드하면 PR 분석 시 RAG로 활용됩니다"
+              endpoint="/api/rag/upload/convention"
+              accept=".md,.txt,.yaml,.yml"
+            />
+            <DocUploadSection
+              title="비즈니스 룰북"
+              description="도메인/비즈니스 규칙 문서를 업로드하면 영향도 분석에 활용됩니다"
+              endpoint="/api/rag/upload/domain"
+              accept=".md,.txt"
+            />
+            <RagStats />
+          </div>
         </div>
       )}
 
@@ -479,5 +498,120 @@ function PRListItem({
         />
       </div>
     </motion.button>
+  );
+}
+
+function DocUploadSection({
+  title,
+  description,
+  endpoint,
+  accept,
+}: {
+  title: string;
+  description: string;
+  endpoint: string;
+  accept: string;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setResult(null);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("team_name", "default");
+
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const resp = await fetch(`${API_BASE}${endpoint}`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!resp.ok) {
+        const data = await resp.json();
+        throw new Error(data.detail || "업로드 실패");
+      }
+
+      const data = await resp.json();
+      setResult(`${data.filename} — ${data.chunks}개 청크 인덱싱 완료`);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "업로드 실패");
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <h4 className="text-xs font-semibold mb-1">{title}</h4>
+      <p className="text-[10px] text-muted-foreground mb-2">{description}</p>
+      <label
+        className={cn(
+          "flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-xs font-medium cursor-pointer transition-all",
+          "border border-dashed border-border hover:border-primary/50 hover:bg-primary/5",
+          uploading && "opacity-50 cursor-not-allowed"
+        )}
+      >
+        {uploading ? (
+          <><Loader2 className="w-3.5 h-3.5 animate-spin" /> 업로드 중...</>
+        ) : (
+          <><span className="text-base">📄</span> 파일 선택 ({accept})</>
+        )}
+        <input
+          type="file"
+          accept={accept}
+          onChange={handleUpload}
+          disabled={uploading}
+          className="hidden"
+        />
+      </label>
+      {result && (
+        <p className="mt-2 text-[10px] text-emerald-400">
+          <CheckCircle2 className="w-3 h-3 inline mr-1" />{result}
+        </p>
+      )}
+      {error && (
+        <p className="mt-2 text-[10px] text-red-400">{error}</p>
+      )}
+    </div>
+  );
+}
+
+function RagStats() {
+  const [stats, setStats] = useState<{ domain_docs: number; convention_docs: number } | null>(null);
+
+  useEffect(() => {
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    fetch(`${API_BASE}/api/rag/stats`)
+      .then((r) => r.json())
+      .then(setStats)
+      .catch(() => {});
+  }, []);
+
+  if (!stats) return null;
+
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <h4 className="text-xs font-semibold mb-2">RAG 인덱스 현황</h4>
+      <div className="flex gap-3 text-[10px]">
+        <div className="flex-1 text-center p-2 rounded bg-muted">
+          <div className="text-lg font-bold text-foreground">{stats.convention_docs}</div>
+          <div className="text-muted-foreground">코딩 가이드</div>
+        </div>
+        <div className="flex-1 text-center p-2 rounded bg-muted">
+          <div className="text-lg font-bold text-foreground">{stats.domain_docs}</div>
+          <div className="text-muted-foreground">비즈니스 룰북</div>
+        </div>
+      </div>
+    </div>
   );
 }

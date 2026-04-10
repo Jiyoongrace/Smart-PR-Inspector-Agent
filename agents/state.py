@@ -96,6 +96,15 @@ class TestResult(BaseModel):
     verification_mode: str = "ai_scenario"  # "ai_scenario" | "code"
 
 
+class BusinessImpact(BaseModel):
+    """비즈니스 관점 영향도 분석"""
+    summary: str = ""
+    affected_features: List[str] = Field(default_factory=list)
+    user_facing_changes: str = ""
+    risk_description: str = ""
+    recommendations: List[str] = Field(default_factory=list)
+
+
 class ImpactAnalysis(BaseModel):
     """코드 영향도 분석 결과"""
     changed_functions: List[str] = Field(default_factory=list)
@@ -103,6 +112,7 @@ class ImpactAnalysis(BaseModel):
     has_api_changes: bool = False
     call_chain: List[str] = Field(default_factory=list)
     risk_level: str = "low"  # low | medium | high | critical
+    business_impact: Optional[BusinessImpact] = None
 
 
 class ComplexityResult(BaseModel):
@@ -112,11 +122,22 @@ class ComplexityResult(BaseModel):
     high_complexity_functions: List[str] = Field(default_factory=list)
 
 
+class ArchReviewResult(BaseModel):
+    """아키텍처 룰 점검 결과"""
+    has_violation: bool = False
+    violations: List[str] = Field(default_factory=list)
+    # HITL 승인 상태: pending / approved / rejected
+    approval_status: str = "pending"
+    reviewer: str = ""
+    review_comment: str = ""
+
+
 class NodeExecutionStatus(BaseModel):
     """각 노드의 실행 상태 (UI 실시간 표시용)"""
     fetch: NodeStatus = NodeStatus.PENDING
     convention: NodeStatus = NodeStatus.PENDING
     test_gen: NodeStatus = NodeStatus.PENDING
+    arch_review: NodeStatus = NodeStatus.PENDING
     test_run: NodeStatus = NodeStatus.PENDING
     impact: NodeStatus = NodeStatus.PENDING
     domain_explain: NodeStatus = NodeStatus.PENDING
@@ -136,6 +157,8 @@ class AgentState(BaseModel):
     # 각 분석 결과
     convention_result: Optional[ConventionResult] = None
     test_result: Optional[TestResult] = None
+    # test_gen → test_run 전달용 시나리오 임시 저장
+    pending_scenarios: List[TestScenario] = Field(default_factory=list)
     impact_analysis: Optional[ImpactAnalysis] = None
     complexity_result: Optional[ComplexityResult] = None
 
@@ -150,6 +173,9 @@ class AgentState(BaseModel):
     final_comment: Optional[str] = None
     slack_thread_id: Optional[str] = None
     github_comment_id: Optional[int] = None
+
+    # 아키텍처 룰 점검 (HITL)
+    arch_review: Optional[ArchReviewResult] = None
 
     # 실행 메타데이터
     node_status: NodeExecutionStatus = Field(default_factory=NodeExecutionStatus)
