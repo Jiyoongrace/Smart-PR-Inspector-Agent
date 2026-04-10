@@ -237,8 +237,6 @@ $diff_snippet
   "risk_description": "비즈니스 리스크 설명 (장애 시 영향, 2-3문장)",
   "recommendations": ["시니어 관점 배포 전 권장 사항 목록 (3-5개)"]
 }""")
-
-
 # ── 버그 재현 테스트 프롬프트 ─────────────────────────────────────────────
 
 BUG_REPRODUCTION_PROMPT = Template("""다음 GitHub 이슈를 재현하는 pytest 테스트를 작성하세요.
