@@ -37,6 +37,7 @@ export function Header() {
   const [error, setError] = useState("");
 
   const handleAnalyze = async () => {
+    console.log("[Smart PR] handleAnalyze 호출됨", { repoInput, prInput, isAnalyzing });
     const prNumber = parseInt(prInput);
     if (!repoInput || !prInput || isNaN(prNumber)) {
       setError("레포지토리와 PR 번호를 올바르게 입력하세요");
@@ -61,6 +62,7 @@ export function Header() {
       pr_data: null,
       convention_result: null,
       test_result: null,
+      pending_scenarios: [],
       impact_analysis: null,
       domain_explanation: null,
       domain_sources: [],
@@ -72,6 +74,7 @@ export function Header() {
         fetch: "pending",
         convention: "pending",
         test_gen: "pending",
+        arch_review: "pending",
         test_run: "pending",
         impact: "pending",
         domain_explain: "pending",
@@ -97,7 +100,7 @@ export function Header() {
       prNumber,
       repoInput,
       (event) => {
-        if (event.type === "node_complete") {
+        if (event.type === "node_complete" || event.type === "hitl_pending") {
           updateNodeStatus(event.status);
         } else if (event.type === "complete") {
           setIsAnalyzing(false);

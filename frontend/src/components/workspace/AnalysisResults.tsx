@@ -16,11 +16,10 @@ import {
   Loader2,
   ExternalLink,
   GitMerge,
-  ThumbsUp,
 } from "lucide-react";
 import { useState } from "react";
 import axios from "axios";
-import { approvePR, mergePR } from "@/lib/api";
+import { mergePR } from "@/lib/api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -251,36 +250,10 @@ function OverviewTab() {
 }
 
 function PRActionPanel({ pr }: { pr: NonNullable<import("@/lib/types").AgentState["pr_data"]> }) {
-  const [approveLoading, setApproveLoading] = useState(false);
   const [mergeLoading, setMergeLoading] = useState(false);
-  const [approveStatus, setApproveStatus] = useState<"idle" | "done" | "error">("idle");
   const [mergeStatus, setMergeStatus] = useState<"idle" | "done" | "error">("idle");
   const [mergeMethod, setMergeMethod] = useState<"merge" | "squash" | "rebase">("squash");
   const [errorMsg, setErrorMsg] = useState("");
-
-  const handleApprove = async () => {
-    setApproveLoading(true);
-    setErrorMsg("");
-    try {
-      await approvePR(pr.repo, pr.pr_number);
-      setApproveStatus("done");
-    } catch (err: unknown) {
-      let msg = "승인 실패";
-      if (axios.isAxiosError(err)) {
-        const detail: string = err.response?.data?.detail ?? err.message;
-        // GitHub 정책: 자신의 PR은 자신이 승인 불가
-        if (detail.includes("approve your own pull request")) {
-          msg = "자신이 작성한 PR은 직접 승인할 수 없습니다. 다른 팀원에게 요청하세요.";
-        } else {
-          msg = detail;
-        }
-      }
-      setErrorMsg(msg);
-      setApproveStatus("error");
-    } finally {
-      setApproveLoading(false);
-    }
-  };
 
   const handleMerge = async () => {
     setMergeLoading(true);
@@ -302,26 +275,11 @@ function PRActionPanel({ pr }: { pr: NonNullable<import("@/lib/types").AgentStat
   return (
     <div className="rounded-xl border border-border bg-card p-4">
       <h4 className="text-xs font-semibold mb-3">PR 액션</h4>
+      <p className="text-[10px] text-muted-foreground mb-3">
+        PR 승인/수정 요청은 Slack에서 처리하세요.
+      </p>
 
       <div className="flex items-center gap-2 flex-wrap">
-        {/* 승인 버튼 */}
-        <button
-          onClick={handleApprove}
-          disabled={approveLoading || approveStatus === "done"}
-          className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
-            approveStatus === "done"
-              ? "bg-emerald-500/20 text-emerald-400 cursor-default"
-              : "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50"
-          )}
-        >
-          {approveLoading
-            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            : <ThumbsUp className="w-3.5 h-3.5" />
-          }
-          {approveStatus === "done" ? "승인 완료" : "PR 승인"}
-        </button>
-
         {/* 머지 방식 선택 */}
         <select
           value={mergeMethod}
