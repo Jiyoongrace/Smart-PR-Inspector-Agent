@@ -207,43 +207,34 @@ def _get_slack_handler():
     def handle_approve(ack, body, client):
         """승인 버튼 → GitHub Approve + '~~~ 기능 PR 승인했습니다' 메시지"""
         ack()
+        logger.info(f"[Slack] approve_pr 액션 수신: user={body.get('user', {}).get('name')}")
         value = body["actions"][0]["value"]
         repo, pr_number, pr_title = _parse_button_value_v2(value)
         user = body.get("user", {}).get("name", "알 수 없음")
 
         try:
             _github_approve(repo, pr_number)
-            result_blocks = [
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": (
-                            f"✅ *{pr_title}* 기능 PR 승인했습니다.\n"
-                            f"승인자: `{user}` | PR #{pr_number}"
-                        ),
-                    },
-                },
-            ]
+            result_text = (
+                f"✅ *{pr_title}* 기능 PR 승인했습니다.\n"
+                f"승인자: `{user}` | PR #{pr_number}"
+            )
         except Exception as e:
             logger.error(f"GitHub 승인 실패: {e}")
-            result_blocks = [
-                {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": f"❌ PR #{pr_number} 승인 실패: {e}"},
-                },
-            ]
-        client.chat_update(
-            channel=body["channel"]["id"],
-            ts=body["message"]["ts"],
-            text=f"✅ {pr_title} PR 승인 완료",
-            blocks=result_blocks,
+            result_text = f"❌ PR #{pr_number} 승인 실패: {e}"
+
+        result_blocks = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": result_text}},
+        ]
+        _send_slack_response(
+            client, body, result_text, result_blocks,
+            fallback_text=f"✅ {pr_title} PR 승인 완료",
         )
 
     @slack_app.action("request_changes")
     def handle_request_changes(ack, body, client):
         """수정 요청 버튼 → 수정 영역 선택 메뉴 표시"""
         ack()
+        logger.info(f"[Slack] request_changes 액션 수신: user={body.get('user', {}).get('name')}")
         value = body["actions"][0]["value"]
         repo, pr_number, pr_title = _parse_button_value_v2(value)
 
@@ -275,17 +266,18 @@ def _get_slack_handler():
                 ],
             },
         ]
-        client.chat_update(
-            channel=body["channel"]["id"],
-            ts=body["message"]["ts"],
-            text=f"🔄 PR #{pr_number} 수정 영역 선택 중...",
+        _send_slack_response(
+            client, body,
+            text=f"🔄 PR #{pr_number} 수정 영역 선택",
             blocks=select_blocks,
+            fallback_text=f"🔄 PR #{pr_number} 수정 영역 선택 중...",
         )
 
     @slack_app.action("select_change_area")
     def handle_select_change_area(ack, body, client):
         """수정 영역 선택 → GitHub Request Changes + 확인 메시지"""
         ack()
+        logger.info(f"[Slack] select_change_area 액션 수신")
         selected = body["actions"][0]["selected_option"]["value"]
         # 형식: "repo|pr_number|pr_title|수정영역"
         parts = selected.split("|")
@@ -297,31 +289,20 @@ def _get_slack_handler():
                 repo, pr_number,
                 comment=f"🔄 [{area}] 영역의 수정이 요청되었습니다. (요청자: {user})",
             )
-            result_blocks = [
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": (
-                            f"🔄 *{pr_title}* 기능 *[{area}]* 수정 요청하였습니다.\n"
-                            f"요청자: `{user}` | PR #{pr_number}"
-                        ),
-                    },
-                },
-            ]
+            result_text = (
+                f"🔄 *{pr_title}* 기능 *[{area}]* 수정 요청하였습니다.\n"
+                f"요청자: `{user}` | PR #{pr_number}"
+            )
         except Exception as e:
             logger.error(f"GitHub 수정 요청 실패: {e}")
-            result_blocks = [
-                {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": f"❌ PR #{pr_number} 수정 요청 실패: {e}"},
-                },
-            ]
-        client.chat_update(
-            channel=body["channel"]["id"],
-            ts=body["message"]["ts"],
-            text=f"🔄 {pr_title} [{area}] 수정 요청 완료",
-            blocks=result_blocks,
+            result_text = f"❌ PR #{pr_number} 수정 요청 실패: {e}"
+
+        result_blocks = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": result_text}},
+        ]
+        _send_slack_response(
+            client, body, result_text, result_blocks,
+            fallback_text=f"🔄 {pr_title} [{area}] 수정 요청 완료",
         )
 
     @slack_app.action("view_pr")
@@ -330,6 +311,73 @@ def _get_slack_handler():
 
     _slack_bolt_handler = SlackRequestHandler(slack_app)
     return _slack_bolt_handler
+
+
+def _send_slack_response(client, body, text: str, blocks: list, fallback_text: str = None) -> None:
+    """Slack 인터랙션 응답 메시지 전송 (chat_update 우선, 실패 시 chat_postMessage 폴백)
+
+    chat_update는 봇이 원본 메시지의 작성자일 때만 동작합니다.
+    Webhook으로 보낸 메시지나 권한 문제로 update가 실패하는 경우를 대비해
+    스레드에 새 메시지를 게시하는 폴백을 둡니다.
+
+    추가로 response_url이 있으면 ephemeral이 아닌 in_channel 응답으로도 전송합니다.
+    """
+    from slack_sdk.errors import SlackApiError
+    import urllib.request
+    import json as _json
+
+    channel_id = body.get("channel", {}).get("id")
+    message_ts = body.get("message", {}).get("ts")
+    response_url = body.get("response_url")
+
+    update_ok = False
+    if channel_id and message_ts:
+        try:
+            client.chat_update(
+                channel=channel_id,
+                ts=message_ts,
+                text=fallback_text or text,
+                blocks=blocks,
+            )
+            update_ok = True
+            logger.info("[Slack] chat_update 성공")
+        except SlackApiError as e:
+            logger.warning(f"[Slack] chat_update 실패 (폴백 시도): {e.response.get('error') if e.response else e}")
+        except Exception as e:
+            logger.warning(f"[Slack] chat_update 예외 (폴백 시도): {e}")
+
+    # 폴백 1: response_url로 채널에 메시지 게시 (가장 안정적)
+    if not update_ok and response_url:
+        try:
+            payload = _json.dumps({
+                "response_type": "in_channel",
+                "replace_original": False,
+                "text": text,
+                "blocks": blocks,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                response_url, data=payload,
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                resp.read()
+            logger.info("[Slack] response_url 폴백 전송 성공")
+            return
+        except Exception as e:
+            logger.warning(f"[Slack] response_url 폴백 실패: {e}")
+
+    # 폴백 2: chat_postMessage로 스레드에 새 메시지
+    if not update_ok and channel_id:
+        try:
+            client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=message_ts,
+                text=text,
+                blocks=blocks,
+            )
+            logger.info("[Slack] chat_postMessage 폴백 성공 (스레드)")
+        except Exception as e:
+            logger.error(f"[Slack] 모든 응답 방식 실패: {e}")
 
 
 def _parse_button_value(value: str) -> tuple[str, int]:
