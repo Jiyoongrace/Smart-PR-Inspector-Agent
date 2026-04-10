@@ -8,8 +8,9 @@
 | LLM Chaining | **LangChain** | 0.3.x | LLM 체이닝, RAG 파이프라인 |
 | Primary LLM | **Anthropic Claude** | claude-sonnet-4-6 | 코드 분석 및 생성 (긴 컨텍스트 처리) |
 | Fallback LLM | **OpenAI GPT-4** | gpt-4-turbo | 대안 LLM |
-| Vector DB | **ChromaDB** | 최신 | 도메인 문서 벡터 저장 (로컬, 무료) |
-| Vector DB (Cloud) | **Pinecone** | Free Tier | 프로덕션 벡터 저장 (옵션) |
+| Vector DB (Dense) | **ChromaDB** | 0.5.x | 도메인 문서 Dense 벡터 검색 (로컬, 무료) |
+| Sparse Search | **rank-bm25** | 0.2.x | BM25 Sparse 키워드 검색 (Hybrid RAG) |
+| Re-ranking | **sentence-transformers** | 3.3.x | Cross-Encoder Re-ranking (ms-marco-MiniLM) |
 | Cache | **Redis** | 7.x | 세션 상태 캐싱 |
 | Validation | **Pydantic** | 2.x | Agent State 스키마 정의 |
 
