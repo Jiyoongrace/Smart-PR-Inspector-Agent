@@ -251,7 +251,8 @@ def _build_impact_section(state: AgentState) -> str:
 
 
 def _build_domain_section(state: AgentState) -> str:
-    lines = ["### 📖 비즈니스 영향도", ""]
+    rag_badge = "🔍 RAG 문서 기반" if state.domain_sources else "🤖 코드 추론"
+    lines = [f"### 📖 비즈니스 영향도 — {rag_badge}", ""]
     lines.append(state.domain_explanation)
 
     if state.domain_sources:
