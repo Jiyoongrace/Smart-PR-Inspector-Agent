@@ -9,6 +9,7 @@ import hmac
 import json
 import logging
 import os
+import time
 from typing import AsyncGenerator
 
 from dotenv import load_dotenv
@@ -33,6 +34,9 @@ app = FastAPI(
     description="GitHub PR 자동 분석 에이전트 API",
     version="1.2.0",
 )
+
+# 프로세스 기동 시각 - /api/uptime 에서 경과 시간 계산에 사용
+_PROCESS_START_TS: float = time.time()
 
 # RAG 문서 업로드 라우터 등록
 from api.rag_upload import router as rag_upload_router
@@ -766,6 +770,27 @@ async def version_info() -> dict:
             "Slack interactive approval",
             "SSE streaming dashboard",
         ],
+    }
+
+
+@app.get("/api/uptime")
+async def uptime_info() -> dict:
+    """서버 가동 시간 조회 - 대시보드 상태 배지·모니터링 알림에서 사용"""
+    from datetime import datetime, timezone
+
+    now = time.time()
+    elapsed = max(0.0, now - _PROCESS_START_TS)
+
+    days, remainder = divmod(int(elapsed), 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    human = f"{days}d {hours:02d}h {minutes:02d}m {seconds:02d}s"
+
+    return {
+        "started_at": datetime.fromtimestamp(_PROCESS_START_TS, tz=timezone.utc).isoformat(),
+        "now": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+        "uptime_seconds": round(elapsed, 3),
+        "uptime_human": human,
     }
 
 
