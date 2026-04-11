@@ -4,7 +4,7 @@
 
 > <a href="https://padlet.com/biz14/breakout-room/kxPM2kBAb0dO4gbV-qg3ezd5A12QEXwNP/wish/do3MQJwBKbJdZ15w
 ">구현 영상 링크</a>
-<img width="1469" height="795" alt="스크린샷 2026-04-10 오후 11 09 19" src="https://github.com/user-attachments/assets/4049a38f-85fe-481a-990b-fce2ae6e9327" />
+<img width="1470" height="800" alt="스크린샷 2026-04-11 오전 11 45 28" src="https://github.com/user-attachments/assets/0b78c2ef-adcb-485d-a896-68ac97d9e7d7" />
 
 ### 🛠 Tech Stack
 
