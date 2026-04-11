@@ -2,6 +2,10 @@
 
 > LangGraph 기반 GitHub Pull Request 자동 분석 AI 에이전트 플랫폼
 
+> <a href="https://padlet.com/biz14/breakout-room/kxPM2kBAb0dO4gbV-qg3ezd5A12QEXwNP/wish/do3MQJwBKbJdZ15w
+">구현 영상 링크</a>
+<img width="1469" height="795" alt="스크린샷 2026-04-10 오후 11 09 19" src="https://github.com/user-attachments/assets/4049a38f-85fe-481a-990b-fce2ae6e9327" />
+
 ### 🛠 Tech Stack
 
 **Core AI / Agent**
@@ -311,7 +315,7 @@ smart-pr-inspector-agent/
 - [`docs/agent-workflow.md`](docs/agent-workflow.md) — 11노드 상세 설명
 - [`docs/features.md`](docs/features.md) — 기능 상세
 - [`docs/tech-stack.md`](docs/tech-stack.md) — 기술 스택
-- [`docs/project-presentation.md`](docs/project-presentation.md) — 프로젝트 종합 문서 + 발표 대본
+- [`docs/project-presentation.md`](docs/project-presentation.md) — 프로젝트 종합 문서
 - [`SKILL.md`](SKILL.md) — 11개 스킬 선언적 정의
 - [`CHANGES.md`](CHANGES.md) — 버전별 변경 이력
 
